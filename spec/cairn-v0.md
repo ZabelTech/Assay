@@ -82,19 +82,28 @@ A career object is the root document served by a Cairn endpoint. It has the foll
   "claims": [
     { ... },
     { ... }
-  ]
+  ],
+  "signature": {
+    "alg": "EdDSA",
+    "key_id": "did:web:alice.career#key-1",
+    "created_at": "2026-05-10T14:32:00Z",
+    "value": "..."
+  }
 }
 ```
 
-|Field           |Type              |Required|Description                                         |
-|----------------|------------------|--------|----------------------------------------------------|
-|`@context`      |array of strings  |REQUIRED|JSON-LD contexts. MUST include the Cairn v0 context.|
-|`schema_version`|string            |REQUIRED|The Cairn schema version this object conforms to.   |
-|`subject`       |DID               |REQUIRED|The identifier of the person this object describes. |
-|`updated_at`    |ISO-8601 timestamp|REQUIRED|Last modification time of the career object.        |
-|`claims`        |array of Claim    |REQUIRED|The claims that make up the career. May be empty.   |
+|Field           |Type              |Required|Description                                                         |
+|----------------|------------------|--------|--------------------------------------------------------------------|
+|`@context`      |array of strings  |REQUIRED|JSON-LD contexts. MUST include the Cairn v0 context.                |
+|`schema_version`|string            |REQUIRED|The Cairn schema version this object conforms to.                   |
+|`subject`       |DID               |REQUIRED|The identifier of the person this object describes.                 |
+|`updated_at`    |ISO-8601 timestamp|REQUIRED|Last modification time of the career object.                        |
+|`claims`        |array of Claim    |REQUIRED|The claims that make up the career. May be empty.                   |
+|`signature`     |object            |OPTIONAL|Subject signature over the canonicalized career object. See §6.4.   |
 
 The career object MAY contain additional implementation-specific fields. Conforming clients MUST ignore unrecognized top-level fields.
+
+The career-object `signature` covers the entire document, including the full `claims` array. It is most useful for full-export scenarios — for example, the candidate downloading their own data, or a tokenized URL granting unfiltered access. It is **not** verifiable against a filtered response returned by a tool call subject to visibility (§9), because filtering changes the canonicalized bytes. For cold-query patterns where filtering applies, per-claim signatures (§6.1) are the practical form.
 
 ## 6. Claims
 
@@ -114,7 +123,13 @@ Every claim, regardless of type, has the following common shape:
   "attestation": { ... },
   "visibility": "public",
   "created_at": "2024-09-02T10:14:00Z",
-  "updated_at": "2024-09-02T10:14:00Z"
+  "updated_at": "2024-09-02T10:14:00Z",
+  "signature": {
+    "alg": "EdDSA",
+    "key_id": "did:web:alice.career#key-1",
+    "created_at": "2024-09-02T10:14:00Z",
+    "value": "..."
+  }
 }
 ```
 
@@ -129,6 +144,9 @@ Every claim, regardless of type, has the following common shape:
 |`visibility` |enum              |REQUIRED|`public`, `permissioned`, or `private`. See §9.                   |
 |`created_at` |ISO-8601 timestamp|REQUIRED|When the claim was first added to the career object.              |
 |`updated_at` |ISO-8601 timestamp|REQUIRED|When the claim was last modified.                                 |
+|`signature`  |object            |OPTIONAL|Subject signature over the canonicalized claim envelope. See §6.4.|
+
+The optional `signature` field is a signature from the subject covering the entire claim envelope (the claim object minus the `signature` field itself), per §6.4. When present, it defends against the host modifying `value`, `attestation`, `evidence`, `visibility`, or timestamps after the claim was authored. It does not defend against the host omitting claims from a response entirely — see §6.4 for the full threat model and §13 for security considerations. Derived claims (§7.5) MUST NOT carry a subject signature; they are server-generated and not authored by the subject.
 
 ### 6.2 Standard claim types
 
@@ -340,6 +358,78 @@ Implementations MAY define custom claim types using a namespaced identifier:
 Conforming clients MUST NOT reject a career object containing custom claim types. Clients SHOULD surface them in raw form when they cannot interpret them.
 
 > **Open question.** Whether to operate a registry of custom types so the most common extensions (security clearances, professional licenses, industry-specific certs) get standardized. Probably yes, post-v0.
+
+### 6.4 Subject signatures and canonicalization
+
+Subject signatures are an OPTIONAL integrity layer over the career object (§5) and individual claims (§6.1). They are produced by the subject's DID key and verifiable by any querying agent against the subject's DID Document.
+
+Conforming servers MAY produce and serve subject signatures. Conforming clients MUST be able to consume career objects and claims regardless of whether signatures are present; clients that verify signatures MUST do so per the rules in this section.
+
+#### 6.4.1 Signature shape
+
+Both the career-object signature and the claim signature use the same shape:
+
+```json
+"signature": {
+  "alg": "EdDSA",
+  "key_id": "did:web:alice.career#key-1",
+  "created_at": "2026-05-10T14:32:00Z",
+  "value": "base64url-encoded-signature-bytes"
+}
+```
+
+|Field       |Required|Description                                                                                            |
+|------------|--------|-------------------------------------------------------------------------------------------------------|
+|`alg`       |REQUIRED|Signature algorithm. Conforming implementations MUST support `EdDSA` (Ed25519). Others MAY be supported.|
+|`key_id`    |REQUIRED|Verification method identifier in the subject's DID Document.                                          |
+|`created_at`|REQUIRED|Timestamp at which the signature was produced.                                                         |
+|`value`     |REQUIRED|Base64url-encoded signature bytes.                                                                     |
+
+#### 6.4.2 Canonicalization
+
+The signed bytes are produced by [JSON Canonicalization Scheme (RFC 8785)](https://www.rfc-editor.org/rfc/rfc8785) applied to the object with its `signature` field removed.
+
+The procedure for signing:
+
+1. Construct the object (career object or claim) without a `signature` field.
+2. Canonicalize the object per RFC 8785.
+3. Sign the canonicalized bytes with the subject's private key corresponding to `key_id`.
+4. Attach the resulting `signature` object to the original.
+
+The procedure for verifying:
+
+1. Resolve the subject's DID Document and locate the verification method identified by `key_id`.
+2. Construct a copy of the received object without its `signature` field.
+3. Canonicalize the copy per RFC 8785.
+4. Verify the signature against the canonicalized bytes using the resolved public key.
+
+Conforming clients that verify signatures MUST treat verification failure as an integrity failure and SHOULD surface this to any human in the loop. Clients MAY refuse to act on claims whose signatures fail to verify.
+
+#### 6.4.3 What signatures defend against
+
+Subject signatures defend against the following classes of host tampering:
+
+- Modification of a claim's `value`, `attestation`, `evidence`, `visibility`, or timestamps after the claim was authored.
+- Substitution of a forged claim under an existing `claim_id`.
+- Insertion of a fabricated claim into the career object's signed `claims` array (career-object signature only).
+
+Subject signatures do **not** defend against:
+
+- The host omitting claims from a response. A signed `claims` array in the full career object is verifiable only when the full array is returned; tools that filter by visibility (§9) return a subset, and no per-claim signature can prove the absence of other claims. A signed-enumeration mechanism for detecting omissions is deferred to a later version of the protocol.
+- The host returning stale claims. The protocol does not currently specify a freshness binding between signature timestamps and response freshness.
+- Audit log forgery. Audit logs are operator-generated and cannot be signed by the subject; their integrity depends on operator honesty.
+
+#### 6.4.4 Key custody and the trust model
+
+Subject signatures provide cryptographic defense against host tampering only to the extent that the host does not also control the signing key. A hosted Cairn operator that holds the subject's signing key can re-sign any modification it makes, reducing the threat model to operator trust — the same level as unsigned claims.
+
+For signatures to provide independent integrity guarantees, the signing key MUST be controlled outside the operator. This typically means either a candidate-side device (a browser-resident key, a mobile wallet, a hardware key) or a separate signing service the candidate controls. Hosted operators SHOULD support BYO-key configurations (§13).
+
+The protocol does not provide a cryptographic way to declare whether a given signature was produced by a host-held or subject-held key — that distinction is itself outside the cryptographic envelope. Agents reasoning about it depend on `server_info.behaviors.subject_key_custody` (§10.3.1) and on any third-party operator audits (§10.3.2).
+
+#### 6.4.5 Derived claims and signatures
+
+Derived claims (§7.5) MUST NOT carry a subject `signature` field, because derivations are authored by the server at query time, not by the subject. Servers MAY sign derived claims with their own DID key as part of `attestation.derived_by`-bound proof; this is OPTIONAL in v0 and not standardized.
 
 ## 7. Attestation
 
@@ -871,7 +961,9 @@ A querying agent that lands on a Cairn endpoint needs to know what kind of serve
     "default_compensation_visibility": "private",
     "audit_logging": true,
     "token_log_stripping": true,
-    "audience_binding_default": "bearer"
+    "audience_binding_default": "bearer",
+    "subject_signing_supported": true,
+    "subject_key_custody": "byo_key"
   },
   "attestations": [
     {
@@ -886,6 +978,8 @@ A querying agent that lands on a Cairn endpoint needs to know what kind of serve
 ```
 
 The `operator.type` field MUST be one of `hosted` (operated by a service provider), `self_hosted` (operated by the subject themselves), or `experimental` (development/research instance, not intended for production use).
+
+`behaviors.subject_signing_supported` declares whether the server produces subject signatures (§6.4) on career objects and claims. `behaviors.subject_key_custody` MUST be one of `operator_held` (the server controls the subject's signing key), `byo_key` (the subject controls the key, the server only relays signatures produced elsewhere), or `mixed` (the operator supports both modes and the choice is per-subject). Agents reasoning about signature trust SHOULD weight `byo_key` signatures more strongly than `operator_held` signatures; see §6.4.4.
 
 #### 10.3.2 Self-attested vs attested metadata
 
@@ -966,6 +1060,7 @@ Breaking changes (incompatible field renames, semantic changes to existing field
 - Servers SHOULD rate-limit document and image retrieval to mitigate scraping and bandwidth amplification attacks.
 - Issuers SHOULD use key rotation and publish revocation lists; clients SHOULD check revocation when verifying credentials.
 - Content hashes on rich evidence prevent silent substitution of documents or images after a claim is queried. Querying agents SHOULD verify hashes on retrieval.
+- Subject signatures (§6.4) are OPTIONAL in v0 but RECOMMENDED for hosted deployments that support BYO-key custody. Signatures defend against host modification of claim values, attestation metadata, evidence references, and visibility settings after authoring. They do not defend against omission of claims from a response, nor against stale-response or audit-log integrity failures. Agents SHOULD verify any signatures present and SHOULD weight unsigned claims and `operator_held` signed claims as offering similar host-trust guarantees; only `byo_key` signatures (§10.3.1) provide meaningful independence from the host's good behavior.
 - Embedded signature validation depends on certificate and DID infrastructure outside the protocol's control. Servers SHOULD maintain reasonable trust roots (e.g., EU Trusted Lists for eIDAS qualified certificates) and SHOULD document their trust configuration in `server_info.behaviors`.
 - Screenshots provide no cryptographic guarantees and MUST NOT be treated as elevating attestation under any circumstances.
 - Derived claims (§7.5) are server-mediated and inherit the trust of both the synthesizing server and their source claims. A compromised or malicious server can produce derived claims that misrepresent their sources; querying agents that depend on synthesis SHOULD weight `server_info` attestations accordingly and SHOULD be able to fall back to direct reasoning over `derived_from` source claims.
@@ -1001,6 +1096,9 @@ The following are deliberately unresolved in v0:
 1. **Attestation retroactivity for documents.** When a candidate uploads a signed document that should retroactively elevate a previously `self_attested` claim to `issuer_attested`, whether the elevation is automatic or requires explicit candidate action. Probably the latter.
 1. **Derivation method vocabulary.** Whether to standardize an enum of `method` values for derived claims (§7.5) — e.g. `llm_summary`, `aggregation`, `temporal_filter`, `selection_only` — so agents can mechanically reason about synthesis trust rather than parsing free-text labels.
 1. **Derived-claim freshness semantics.** A `derived` claim's `derived_at` reflects synthesis time, not the freshness of underlying source claims. Whether agents should be required to surface the oldest `verified_at` among `derived_from` source claims rather than the synthesis timestamp.
+1. **Signed enumeration of claims.** Per-claim signatures (§6.4) defend against modification but not against the host omitting claims from a response. A signed enumeration — for example, a subject-signed Merkle root over `claim_id` values, or a per-response signed claim manifest — would close that gap, at the cost of additional ceremony on every read. Deferred to v0.1.
+1. **Signature algorithm portfolio.** v0 requires `EdDSA` (Ed25519) support. Whether `ES256K` (secp256k1) or `ES256` (P-256) should also be REQUIRED, given their prevalence in existing wallets and key-management systems, is deferred.
+1. **Whether to upgrade subject signatures from OPTIONAL to RECOMMENDED in v0.1.** The current design treats them as opt-in to ease initial implementation; once BYO-key infrastructure is more widely deployed, signing SHOULD likely become the default for hosted operators.
 
 The following are now resolved:
 
@@ -1020,6 +1118,7 @@ Comments, alternatives, and prototypes addressing any of the remaining open ques
 - [OpenID for Verifiable Credentials](https://openid.net/sg/openid4vc/)
 - [JSON-LD 1.1](https://www.w3.org/TR/json-ld11/)
 - [RFC 2119 — Key words for use in RFCs](https://www.rfc-editor.org/rfc/rfc2119)
+- [RFC 8785 — JSON Canonicalization Scheme (JCS)](https://www.rfc-editor.org/rfc/rfc8785)
 - [Schema.org](https://schema.org)
 
 -----
