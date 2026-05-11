@@ -63,9 +63,7 @@ did:web:alice.career
 
 The DID Document MUST contain at least one verification method (public key) that can be used to verify signatures over claims and credentials issued by the subject.
 
-Issuers and endorsers SHOULD also be identified by DIDs, so that signed claims can be cryptographically verified against a resolvable public key.
-
-> **Open question.** Whether to require DIDs for endorsers in v0, or permit a degraded "verified email" identifier for the common case where the endorser does not yet have a DID. Currently leaning toward permitting both, with explicit attestation level downgrades for the email case.
+Issuers and endorsers SHOULD also be identified by DIDs, so that signed claims can be cryptographically verified against a resolvable public key. For endorsers who do not yet have a DID, verified-email identity (§7.4) is permitted as a fallback, with the trust implications described there.
 
 ## 5. The Career Object
 
@@ -397,18 +395,82 @@ The credential MUST be retrievable by the querying agent (subject to visibility,
 
 ### 7.4 `peer_attested`
 
-The claim is signed by an individual endorser, typically over an `endorsement` claim.
+The claim is backed by an individual endorser, typically over an `endorsement` claim. Two endorser identity methods are recognized, discriminated by the `endorser_method` field. DID-signed is preferred; verified-email is a documented fallback for endorsers who do not yet have a DID.
+
+#### 7.4.1 `endorser_method: "did"` (preferred)
 
 ```json
 "attestation": {
   "level": "peer_attested",
+  "endorser_method": "did",
   "endorser": "did:web:bob.dev",
   "signature": "...",
   "signed_at": "2026-04-10T08:00:00Z"
 }
 ```
 
-The signature MUST verify against the endorser's DID Document.
+The signature MUST verify against the endorser's DID Document, over the canonicalized `value` of the parent claim.
+
+#### 7.4.2 `endorser_method: "verified_email"` (fallback)
+
+```json
+"attestation": {
+  "level": "peer_attested",
+  "endorser_method": "verified_email",
+  "endorser_email_domain": "acme.com",
+  "endorser_email_local": "bob",
+  "endorser_name": "Bob Müller",
+  "verification": {
+    "verification_id": "vfy_email_a3f9...",
+    "verified_at": "2026-04-10T08:00:00Z",
+    "verifier": "did:web:assay.bot",
+    "verifier_is_subject_host": true,
+    "challenge_method": "click_through_link",
+    "payload_hash": "sha256:8f2a4c7d..."
+  }
+}
+```
+
+The verified-email form is structurally weaker than the DID-signed form: there is no cryptographic key bound to the endorser, so trust in the endorsement transfers to trust in the `verifier` server. Querying agents SHOULD treat `verified_email` endorsements as weaker than DID-signed endorsements but stronger than `self_attested` claims by the subject.
+
+|Field                       |Required   |Description                                                                                  |
+|----------------------------|-----------|---------------------------------------------------------------------------------------------|
+|`endorser_email_domain`     |REQUIRED   |The domain part of the endorser's verified email address (e.g. `acme.com`).                  |
+|`endorser_email_local`      |OPTIONAL   |The local part of the address (`bob` in `bob@acme.com`). Disclosed only with endorser opt-in.|
+|`endorser_name`             |RECOMMENDED|Human-readable endorser name as supplied during verification.                                |
+|`verification.verification_id`|REQUIRED |Stable ID for the verification record, resolvable via `verify_claim` (§10.1.4).              |
+|`verification.verified_at`  |REQUIRED   |Timestamp at which the endorser completed the challenge.                                     |
+|`verification.verifier`     |REQUIRED   |DID of the server that performed the email challenge.                                        |
+|`verification.verifier_is_subject_host`|REQUIRED|Boolean. `true` if `verifier` equals the candidate's `server_info.operator.did`.    |
+|`verification.challenge_method`|REQUIRED|One of the methods defined below.                                                            |
+|`verification.payload_hash` |REQUIRED   |Hash over the canonicalized `value` of the parent claim at the time of verification.         |
+
+The domain part of the endorser's email MUST be disclosed; the local part is OPTIONAL and disclosed only with the endorser's explicit opt-in during the verification flow. This lets agents reason about endorser context (*"the endorser is at @stripe.com"*) without exposing personal email addresses by default.
+
+To produce a verified-email endorsement, a Cairn server MUST:
+
+1. Send a verification challenge to the endorser's stated email address, containing a unique single-use token bound to the specific endorsement payload.
+2. On the endorser's response, capture the timestamp and the endorser's confirmation of the endorsement text (which the endorser MAY edit before confirming).
+3. Compute `payload_hash` over the canonicalized parent claim `value` as confirmed.
+4. Sign the verification record with the server's DID key and store it under a stable `verification_id` retrievable via `verify_claim`.
+
+`verifier_is_subject_host: true` means the candidate's own server performed the verification — the common case, but a conflict of interest. Agents SHOULD note this and weight accordingly. A third-party verifier (an independent email-verification service) yields a stronger record but is OPTIONAL.
+
+#### 7.4.3 Challenge methods
+
+The `challenge_method` field describes how the endorser proved control of the email address. v0 recognizes:
+
+- **`click_through_link`** — the endorser clicked a unique link in the challenge email. Lowest friction, lowest trust. Demonstrates only that the recipient could read the email and act on a link; vulnerable to email auto-clicking security scanners and to opportunistic forwarding.
+- **`code_return`** — the endorser received a code by email and returned it through a separate channel (typically a dashboard URL the endorser navigates to manually). Modestly stronger because it requires two-channel interaction.
+- **`signed_reply`** — the endorser replied to the challenge email and the reply carries a valid DKIM signature from the stated domain. When the domain's DKIM key is independently resolvable, this method provides cryptographic proof of domain control rather than mere clickthrough, and is the strongest of the three.
+
+Servers MAY support additional challenge methods using namespaced identifiers (`x:custom_method`). Querying agents that do not recognize a method SHOULD treat the verification as no stronger than `click_through_link`.
+
+Calls to `verify_claim` (§10.1.4) on a verified-email endorsement MUST return the full verification record, including the `verifier` DID and `challenge_method`, so agents can re-assess trust.
+
+#### 7.4.4 Upgrading to DID
+
+Servers SHOULD support re-issuing a `verified_email` endorsement under a DID signature when the endorser later obtains a DID. The re-issued claim is a new claim (new `claim_id`, new `created_at`) referencing the same underlying endorsement; the original verified-email claim MAY be retained, retired, or replaced at the candidate's discretion.
 
 ### 7.5 `derived`
 
@@ -907,6 +969,7 @@ Breaking changes (incompatible field renames, semantic changes to existing field
 - Embedded signature validation depends on certificate and DID infrastructure outside the protocol's control. Servers SHOULD maintain reasonable trust roots (e.g., EU Trusted Lists for eIDAS qualified certificates) and SHOULD document their trust configuration in `server_info.behaviors`.
 - Screenshots provide no cryptographic guarantees and MUST NOT be treated as elevating attestation under any circumstances.
 - Derived claims (§7.5) are server-mediated and inherit the trust of both the synthesizing server and their source claims. A compromised or malicious server can produce derived claims that misrepresent their sources; querying agents that depend on synthesis SHOULD weight `server_info` attestations accordingly and SHOULD be able to fall back to direct reasoning over `derived_from` source claims.
+- Verified-email endorsements (§7.4.2) depend on the integrity of the endorser's email account and on the honesty of the verifying server. Email accounts get compromised more easily than DID keys, and the verifying server is typically the candidate's own host — a conflict of interest exposed by `verifier_is_subject_host`. Agents SHOULD weight verified-email endorsements accordingly, and especially when both `verifier_is_subject_host: true` and `challenge_method: click_through_link` apply.
 - The subject's signing key is the most sensitive material on the candidate side. Hosted implementations MUST allow subjects to export their key and SHOULD support BYO-key configurations.
 
 ## 14. Privacy considerations
@@ -920,12 +983,12 @@ Breaking changes (incompatible field renames, semantic changes to existing field
 - Servers SHOULD support encrypted-at-rest storage of original (unredacted) documents accessible only to the candidate, with only redacted copies exposed to the protocol.
 - Querying agents SHOULD minimize the claims they request and retain. The principle of least privilege applies to careers as much as to APIs.
 - The subject's DID is a stable, public identifier. Implementations should make subjects aware that linking it across sites enables tracking.
+- Endorsers' email addresses are personal data. Servers MUST NOT disclose the local part of an endorser's email (§7.4.2) without explicit endorser opt-in during the verification flow, and MUST store the full address with the same protections applied to subject-private data. Servers SHOULD allow endorsers to revoke their endorsements and have their email records purged.
 
 ## 15. Open questions
 
 The following are deliberately unresolved in v0:
 
-1. **Endorser identity floor.** Whether peer-attested endorsements require a DID, or whether a verified email is acceptable for the common case.
 1. **Custom type registry.** Whether to operate a registry of common extensions (security clearances, professional licenses, industry-specific certs), and if so, on what governance model.
 1. **Audience binding default.** Whether servers should default to enforcing audience binding on URL tokens (stricter, slightly more friction for normal recruiter forwarding) or to bearer-style access (looser, lower friction). Currently leaning bearer-style as default with audience-bound mode available.
 1. **Resource vs. tool access.** Whether the full career object should be exposed as an MCP resource, or whether all access should flow through tools.
@@ -945,6 +1008,7 @@ The following are now resolved:
 - **`request_access` as a protocol tool** — resolved as no. Cold-query is the protocol's scope (§1.1). Engagement requests happen out-of-band and the candidate responds with a tokenized URL.
 - **Server-side trust signaling** — resolved as factual self-description plus signed third-party attestations (§10.3). No free-text "trust statements," no self-reported scores.
 - **`query_career` output shape** — resolved as claim-shaped only. The tool returns `Claim[]` and no free-text `answer` or self-reported `confidence` score. Synthesis is permitted but MUST flow through the `derived` attestation level (§7.5) so that provenance is preserved and the §10.3.4 prohibition on self-reported aggregate trust signals is not relocated into the query path.
+- **Endorser identity floor** — resolved as both methods permitted. DID-signed endorsements remain preferred; verified-email endorsements (§7.4.2) are accepted as a fallback with the structural trust downgrade exposed via `endorser_method` and `verifier_is_subject_host`. The email domain is always disclosed; the local part is opt-in.
 
 Comments, alternatives, and prototypes addressing any of the remaining open questions are welcome. See [`CONTRIBUTING.md`](../CONTRIBUTING.md).
 
