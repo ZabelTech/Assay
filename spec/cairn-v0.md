@@ -698,7 +698,6 @@ Tokens carried in URLs leak more easily than tokens carried in headers. They app
 - Servers MUST require HTTPS for tokenized URLs.
 - Servers MUST strip the token from their own access logs and SHOULD NOT include it in error responses or stack traces.
 - Querying clients SHOULD treat the URL as sensitive and SHOULD NOT display the full URL in user-facing output.
-- Tokens MUST have reasonable expirations. Implementations SHOULD default to 60–90 days and SHOULD NOT issue tokens with expirations longer than 1 year by default (longer-lived tokens MAY be issued with explicit candidate confirmation).
 - Servers MUST fingerprint requests over tokenized URLs (§9.4.1). This does not prevent forwarding but makes forwarding visible to the candidate as distinct fingerprints under the same `token_id`.
 
 > **Open question.** Whether servers should support a "single-use" mode where a token is invalidated after first successful access. Useful for one-shot resume-equivalent shares; adds complexity for normal multi-query interactions. Currently leaning OPTIONAL.
