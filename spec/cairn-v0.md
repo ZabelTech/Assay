@@ -79,6 +79,8 @@ Endorsers are also identified by email address. The same challenge-response flow
 
 Servers identify their operator by a URL (typically the operator's privacy policy or homepage) and an optional contact email. There is no cryptographic binding between the operator and the data they host; agents that need stronger operator identity assurance are dependent on the v0.1 mechanisms outlined in §15.
 
+Several fields elsewhere in the protocol identify the operating server by URL: `server_info.operator.url` (§10.3.1), `attestation.derived_by` on derived claims (§7.3), and `attestation.verification.verifier_url` on email-attested claims (§7.2). All three refer to the **same canonical operator URL** — the hosting provider's URL for hosted servers (e.g. `https://assay.bot`), the candidate's endpoint host for self-hosted servers (e.g. `https://alice.career`). These URLs are stable server identifiers and MUST NOT vary across requests from the same server.
+
 ## 5. The Career Object
 
 A career object is the root document served by a Cairn endpoint. It has the following shape:
@@ -263,10 +265,17 @@ A vouch from a third party about a specific quality of the subject. Always `emai
     "endorser_name": "Bob Müller",
     "endorser_role": "Engineering Manager",
     "context_claim": "clm_8f2a...",
-    "summary": "Alice led the migration of our core payments service. Calm under pressure, technically rigorous."
+    "summary": "Alice led the migration of our core payments service. Calm under pressure, technically rigorous.",
+    "relationship": "manager",
+    "worked_together_from": "2021-03-01",
+    "worked_together_until": "2024-08-15"
   }
 }
 ```
+
+`value.relationship` is OPTIONAL and, when present, SHOULD be one of `manager`, `report`, `peer`, `collaborator`, `client`, `mentor`, or `mentee`. Custom relationships MAY use a namespaced identifier (`x:custom`).
+
+`value.worked_together_from` and `value.worked_together_until` are OPTIONAL ISO-8601 dates bounding the period the endorser worked with the subject. `worked_together_until` MAY be null when the relationship is ongoing. Together these let agents reason about whether an endorsement is from a current colleague, an old manager, or someone whose collaboration window predates the role being filled.
 
 #### `availability`
 
@@ -854,7 +863,7 @@ The v0.1 release is expected to add the cryptographic mechanisms outlined in §1
 - Email compromise is identity hijack in v0. Because the subject is identified by their email address (§4) and verification consists of demonstrating control of that address, anyone who reads the subject's mailbox can stand up a Cairn endpoint claiming to be that subject — at any URL, under any operator. The TLS certificate confirms which domain the agent reached, not who is operating the server behind it. Candidates SHOULD secure the email address used as their Cairn subject with strong authentication; agents that need stronger identity assurance are dependent on the v0.1 DID and signature mechanisms outlined in §15.
 - Operator identity is unverified in v0. The `operator.url`, `operator.name`, `operator.contact_email`, and other identity fields in `server_info` (§10.3.1) are self-attested strings. A malicious operator can populate these with any values, including impersonating a reputable provider. Agents reasoning about operator identity in v0 depend on out-of-band assurances — the TLS certificate confirms which domain the agent is talking to, not who is operating the server behind it. Cryptographic operator attestation (signed third-party credentials confirming the operator's legal identity) is part of the §15 RFC set and lands in v0.1.
 - Server behavior declarations in `server_info.behaviors` — `audit_logging`, `token_log_stripping`, and similar — are self-attested. The protocol provides no way to verify that a server actually does what it claims to do in this object. This is an accepted v0 limitation, mitigated by `server_info` being structured and factual (§10.3.2) and by the v0.1 conformance-attestation mechanism (§15) that will let independent auditors sign claims about server behavior.
-- Implementations SHOULD bound the size of individual career objects, individual claims, and evidence files (`document_url`, `image_url`). Querying agents SHOULD be prepared to handle truncation or outright refusal of oversized responses. v0 does not specify numerical limits; reference implementations are encouraged to publish theirs alongside the deployment. Without size discipline, a hostile career object can be used to exhaust client resources.
+- Implementations SHOULD bound the size of individual career objects, individual claims, and evidence files (`document_url`, `image_url`). Suggested soft defaults for v0: individual claims under 64KB of JSON, evidence files under 25MB, career objects under 5MB of JSON. Servers MAY publish their actual limits in deployment documentation; querying agents SHOULD be prepared to handle truncation or outright refusal of oversized responses. Without size discipline, a hostile career object can be used to exhaust client resources.
 
 ## 13. Privacy considerations
 
