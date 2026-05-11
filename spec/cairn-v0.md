@@ -16,6 +16,8 @@ It replaces the resume — a static document optimized for printers — with a q
 
 Cairn is a profile of the [Model Context Protocol](https://modelcontextprotocol.io). A Cairn endpoint is an MCP server that exposes a specific set of tools and resources defined here. Any MCP-compatible client can speak to it. Any conforming server interoperates with any conforming client.
 
+Cairn is designed to **coexist** with existing human-readable career networks such as LinkedIn, not replace them. LinkedIn is for humans browsing each other; Cairn is for the agents acting on humans' behalf. A candidate may publish both — a LinkedIn profile their network reads casually and an Assay endpoint a recruiter's agent queries programmatically — and link them through the `identity.handles` field (§6.2). The two are complementary surfaces over the same underlying career, optimized for different consumers.
+
 ### 1.1 Scope: cold-query only
 
 Cairn governs the cold-query layer — the moment an agent first encounters a candidate's professional context and decides whether to engage. What happens after that — phone screens, written exchanges, offers, negotiations — happens between humans, off-protocol. Cairn deliberately does not model progressive disclosure across interview stages, conditional grants, or post-offer negotiation. Those are conversation problems, not data-shape problems, and the protocol's job ends once a recruiter and candidate are in contact.
@@ -63,9 +65,11 @@ This separation matters for portability. A candidate who moves between hosts bri
 
 ### 4.1 Subject email verification
 
-The subject SHOULD have demonstrated control of their email address to the hosting server before that email appears as the `subject` of a career object. The verification flow follows the same email-challenge pattern used for endorser verification (§7.2): the server sends a challenge to the address, and the candidate responds.
+A server MUST verify the subject's control of their email address before serving any career object for that subject. The verification flow follows the same email-challenge pattern used for endorser verification (§7.2): the server sends a challenge to the address and the candidate responds.
 
-`subject_verified` on the career object (§5) indicates whether this verification has occurred. Servers MUST default `subject_verified` to `false` for unverified subjects and MUST NOT silently mark a subject verified without a completed challenge.
+Servers MUST NOT serve a career object whose subject has not completed verification, over either the public or any tokenized endpoint. There is no "unverified subject" state in v0; verification is a precondition for operating a Cairn endpoint with a given subject email.
+
+The verification record is stored alongside the subject and made available to the candidate through the hosting interface. The record is not exposed through the protocol — querying agents trust that the server is meeting this requirement on the basis of `server_info` and out-of-band assurances about the operator (§4.3).
 
 ### 4.2 Endorser identity
 
@@ -87,8 +91,6 @@ A career object is the root document served by a Cairn endpoint. It has the foll
   ],
   "schema_version": "cairn/0.1",
   "subject": "alice@example.com",
-  "subject_verified": true,
-  "endpoint": "https://alice.career/mcp",
   "updated_at": "2026-05-10T14:32:00Z",
   "claims": [
     { ... },
@@ -97,15 +99,13 @@ A career object is the root document served by a Cairn endpoint. It has the foll
 }
 ```
 
-|Field             |Type              |Required|Description                                                                  |
-|------------------|------------------|--------|-----------------------------------------------------------------------------|
-|`@context`        |array of strings  |REQUIRED|JSON-LD contexts. MUST include the Cairn v0 context.                         |
-|`schema_version`  |string            |REQUIRED|The Cairn schema version this object conforms to.                            |
-|`subject`         |string (email)    |REQUIRED|The email address identifying the subject.                                   |
-|`subject_verified`|boolean           |REQUIRED|Whether the subject has completed an email challenge with this server (§4.1).|
-|`endpoint`        |URL               |REQUIRED|The canonical endpoint URL where this career object is hosted.               |
-|`updated_at`      |ISO-8601 timestamp|REQUIRED|Last modification time of the career object.                                 |
-|`claims`          |array of Claim    |REQUIRED|The claims that make up the career. May be empty.                            |
+|Field           |Type              |Required|Description                                                                  |
+|----------------|------------------|--------|-----------------------------------------------------------------------------|
+|`@context`      |array of strings  |REQUIRED|JSON-LD contexts. MUST include the Cairn v0 context.                         |
+|`schema_version`|string            |REQUIRED|The Cairn schema version this object conforms to.                            |
+|`subject`       |string (email)    |REQUIRED|The email address identifying the subject. Verification per §4.1 is a precondition for serving.|
+|`updated_at`    |ISO-8601 timestamp|REQUIRED|Last modification time of the career object.                                 |
+|`claims`        |array of Claim    |REQUIRED|The claims that make up the career. May be empty.                            |
 
 The career object MAY contain additional implementation-specific fields. Conforming clients MUST ignore unrecognized top-level fields.
 
@@ -436,6 +436,12 @@ Querying agents SHOULD treat the effective trust of a derived claim as the minim
 
 A claim with `attestation.level = derived` MUST NOT be cited in another claim's `evidence_claims` array; derived claims are transient and dangling references are forbidden.
 
+#### Conformance scope
+
+Conformance testing for derived claims is necessarily limited. The protocol can verify the **shape** of a derived claim (presence of `derived_by`, `derived_at`, `method`, and `derived_from`; that `derived_from` IDs resolve to claims accessible at the requester's visibility; that no factual content appears without a supporting source). It cannot verify the **faithfulness** of the synthesis — whether the produced summary is actually supported by its cited sources, in the sense a careful reader would accept. Two conforming servers with different selection or synthesis infrastructure will produce different derived claim sets for the same query, and both may be conformant.
+
+Querying agents that depend on derived synthesis SHOULD weight the synthesizing server's reputation accordingly and SHOULD be able to fall back to direct reasoning over `derived_from` source claims when synthesis faithfulness is in doubt.
+
 ### 7.4 Multiple attestations
 
 A single underlying fact MAY be expressed as multiple claims with different attestation levels. For example, Alice's tenure at Stripe could appear as both a `self_attested` employment claim and an `email_attested` endorsement from her former manager corroborating it. Querying agents reconcile these as appropriate.
@@ -458,23 +464,7 @@ The simplest evidence type. A reference to a URL where the underlying material l
 { "type": "url", "url": "https://github.com/alice/field-notes", "label": "Source repository" }
 ```
 
-### 8.3 The `metric` evidence type
-
-A metric value the candidate is reporting from an external system.
-
-```json
-{
-  "type": "metric",
-  "source": "GitHub",
-  "metric": "commits",
-  "value": 847,
-  "as_of": "2026-05-08T..."
-}
-```
-
-v0 does not specify a verification mechanism for these metrics. Agents SHOULD treat metric values as self-attested at the protocol level; live source-verified attestation is outlined in §15.
-
-### 8.4 The `document` evidence type
+### 8.3 The `document` evidence type
 
 A document is a file containing structured or semi-structured information that supports a claim. Common examples: offer letters, employment contracts, diploma scans, certificates, press releases.
 
@@ -516,7 +506,7 @@ Servers MAY extract structured fields from documents (via OCR, PDF text extracti
 
 The `redactions` array names fields the candidate has deliberately removed. Redactions MUST be honest — a document visually altered without declaring redactions is a forgery, not a redaction.
 
-### 8.5 The `image` evidence type
+### 8.4 The `image` evidence type
 
 A photograph or visual artifact supporting a claim. Common examples: photographs of work environments, conference badges, physical artifacts produced by the candidate, before/after photos of construction or design work.
 
@@ -541,7 +531,7 @@ The `capture` object summarizes EXIF data that bears on the image's context. Ser
 
 Cryptographic provenance (C2PA signed images) is outlined in §15.
 
-### 8.6 The `screenshot` evidence type
+### 8.5 The `screenshot` evidence type
 
 A digital capture of an on-screen artifact. Common examples: messaging-app threads, dashboards showing metrics, internal documents naming the candidate.
 
@@ -566,7 +556,7 @@ The `claimed_authenticity` field MAY be one of `self_captured`, `received_from_t
 
 Screenshots default to the same trust level as self-attestation: the candidate is asserting that the screenshot depicts what they say it depicts. v0 provides no verification path for screenshots. Querying agents SHOULD weight screenshots accordingly — useful as supporting evidence alongside stronger attestation, rarely sufficient alone.
 
-### 8.7 Multi-evidence corroboration
+### 8.6 Multi-evidence corroboration
 
 A claim MAY carry multiple evidence objects of any combination of types. The protocol does not aggregate them into a unified score; it surfaces them faithfully and leaves weighting to the querying agent.
 
@@ -746,6 +736,8 @@ Tokens carried in URLs leak more easily than tokens carried in headers. They app
 
 A Cairn endpoint is an MCP server exposing the following tools and resources. Authorization is determined by the presence and validity of a token on each request (§9.1.1): requests without a valid token return only `public` claims, while requests carrying a valid token in any accepted form (header, query, or path) return both `public` and `permissioned` claims. `private` claims are never returned by any tool.
 
+The MCP `tools/list` and `resources/list` primitives MUST return the complete list of tools and resources the server implements, regardless of whether the requesting client is authenticated. Permissions are enforced at call time, not at discovery time. The presence of permissioned tools is not hidden information; their *contents* are. This is consistent with how MCP clients typically reason about server surfaces — a client expects to know what tools exist before it can decide whether it has the credentials to use them.
+
 ### 10.1 Tools
 
 #### 10.1.1 `query_career` (REQUIRED)
@@ -885,11 +877,13 @@ The v0.1 release is expected to add the cryptographic mechanisms outlined in §1
 - All Cairn endpoints SHOULD serve over HTTPS with a valid TLS certificate.
 - Servers SHOULD rate-limit unauthenticated `query_career` requests to mitigate scraping and inference attacks.
 - Servers SHOULD rate-limit document and image retrieval to mitigate scraping and bandwidth amplification attacks.
-- Content hashes on rich evidence (§8.4, §8.5, §8.6) provide integrity but not authenticity. A querying agent verifying a hash confirms the file is the one the candidate published; it does not confirm the file came from any particular issuer. Stronger authenticity guarantees via embedded signature validation are outlined in §15.
+- Content hashes on rich evidence (§8.3, §8.4, §8.5) provide integrity but not authenticity. A querying agent verifying a hash confirms the file is the one the candidate published; it does not confirm the file came from any particular issuer. Stronger authenticity guarantees via embedded signature validation are outlined in §15.
 - Screenshots provide no cryptographic guarantees and MUST NOT be treated as elevating attestation under any circumstances.
 - Derived claims (§7.3) are server-mediated and inherit the trust of both the synthesizing server and their source claims. A compromised or malicious server can produce derived claims that misrepresent their sources; querying agents that depend on synthesis SHOULD be able to fall back to direct reasoning over `derived_from` source claims.
 - Email-attested endorsements (§7.2) depend on the integrity of the endorser's email account and on the honesty of the verifying server. Email accounts get compromised; the verifying server is typically the candidate's own host (exposed by `verifier_is_subject_host`) and has a conflict of interest. Agents SHOULD weight email-attested claims accordingly.
 - v0 does not provide cryptographic protection of any kind against host tampering with the career object. A malicious host can demote `private` claims to `public`, rewrite attestation metadata, fabricate claims, or forge audit log entries, and no v0 mechanism will detect this. Querying agents that need integrity guarantees against the host should require the host to support the subject signature mechanism outlined in §15.
+- Operator identity is unverified in v0. The `operator.url`, `operator.name`, `operator.contact_email`, and other identity fields in `server_info` (§10.3.1) are self-attested strings. A malicious operator can populate these with any values, including impersonating a reputable provider. Agents reasoning about operator identity in v0 depend on out-of-band assurances — the TLS certificate confirms which domain the agent is talking to, not who is operating the server behind it. Cryptographic operator attestation (signed third-party credentials confirming the operator's legal identity) is part of the §15 RFC set and lands in v0.1.
+- Server behavior declarations in `server_info.behaviors` — `audit_logging`, `token_log_stripping`, `request_fingerprinting`, fingerprint composition, and similar — are self-attested. The protocol provides no way to verify that a server actually does what it claims to do in this object. This is an accepted v0 limitation, mitigated by `server_info` being structured and factual (§10.3.2) and by the v0.1 conformance-attestation mechanism (§15) that will let independent auditors sign claims about server behavior.
 
 ## 13. Privacy considerations
 
@@ -955,9 +949,9 @@ Servers MAY implement these mechanisms ahead of v0.1 and declare them in `server
 
 **Mechanism.** A new attestation level `source_verified` indicating that a claim is backed by a live or recent connection to a system of record, typically via OAuth — GitHub commits, App Store Connect ships, AWS certifications. The verification record includes the source, the verification timestamp, and an opaque `verification_id` for re-validation via `verify_claim`.
 
-**Value.** The most commercially valuable trust signal in many practical cases. A senior backend role wants to see "847 merged PRs in this Stripe org, verified two weeks ago" more than it wants a self-attested employment claim. v0 surfaces metric values via the `metric` evidence type but does not verify them.
+**Value.** The most commercially valuable trust signal in many practical cases. A senior backend role wants to see "847 merged PRs in this Stripe org, verified two weeks ago" more than it wants a self-attested employment claim. v0 does not surface metric values in any structured form; a `metric` evidence type with verification semantics should be reintroduced alongside this attestation level so verified counts ("847 commits," "12 published apps," "320k MAU on owned project") have a place to live in the evidence array.
 
-**Open questions.** Freshness semantics (max age, agent-side discounting); which sources to standardize first (GitHub, GitLab, App Store Connect, Google Scholar, others); how OAuth scope and consent surface to the candidate; how source-verification records are stored without retaining the OAuth tokens themselves.
+**Open questions.** Freshness semantics (max age, agent-side discounting); which sources to standardize first (GitHub, GitLab, App Store Connect, Google Scholar, others); how OAuth scope and consent surface to the candidate; how source-verification records are stored without retaining the OAuth tokens themselves; the shape of the reintroduced `metric` evidence type and how it binds to a `source_verified` attestation.
 
 ### 15.4 Issuer-attested via Verifiable Credentials
 
