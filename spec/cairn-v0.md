@@ -376,7 +376,7 @@ The claim is backed by an endorser whose control of an email address has been ve
 |`endorser_email_domain`              |REQUIRED   |The domain part of the endorser's verified email address (e.g. `acme.com`).                  |
 |`endorser_email_local`               |OPTIONAL   |The local part of the address (`bob` in `bob@acme.com`). Disclosed only with endorser opt-in.|
 |`endorser_name`                      |RECOMMENDED|Human-readable endorser name as supplied during verification.                                |
-|`verification.verification_id`       |REQUIRED   |Stable ID for the verification record, resolvable via `verify_claim` (§10.1.4).              |
+|`verification.verification_id`       |REQUIRED   |Stable identifier for the verification record stored alongside the claim.                    |
 |`verification.verified_at`           |REQUIRED   |Timestamp at which the endorser completed the challenge.                                     |
 |`verification.verifier_url`          |REQUIRED   |URL identifying the server that performed the email challenge.                               |
 |`verification.verifier_is_subject_host`|REQUIRED |Boolean. `true` if the verifier is the candidate's own hosting server (a conflict of interest).|
@@ -390,7 +390,7 @@ To produce an email-attested endorsement, a Cairn server MUST:
 1. Send a verification challenge to the endorser's stated email address, containing a unique single-use token bound to the specific endorsement payload.
 2. On the endorser's response, capture the timestamp and the endorser's confirmation of the endorsement text (which the endorser MAY edit before confirming).
 3. Compute `payload_hash` over the canonicalized parent claim `value` as confirmed.
-4. Record the verification record under a stable `verification_id` retrievable via `verify_claim`.
+4. Record the verification record under a stable `verification_id` stored alongside the parent claim.
 
 `verifier_is_subject_host: true` means the candidate's own server performed the verification — the common case, but a conflict of interest. Agents SHOULD note this and weight accordingly. A third-party verifier (an independent email-verification service) yields a stronger record but is OPTIONAL.
 
@@ -760,19 +760,6 @@ Output: { "claim": Claim }
 
 `get_claim` MUST NOT return derived claims; derived claim IDs from a prior `query_career` response are not stable and not resolvable here.
 
-#### 10.1.4 `verify_claim` (RECOMMENDED)
-
-Re-run verification on a specific claim. For `email_attested` claims, this returns the stored verification record (the email challenge cannot be re-run after the fact; the record is the artifact). For `self_attested` claims, this is a no-op that returns the claim as-is. For `derived` claims, the server MAY traverse `derived_from` and return aggregate status; behavior is otherwise unspecified.
-
-```
-Input:  { "claim_id": string }
-Output: {
-  "valid": boolean,
-  "verified_at": ISO8601,
-  "details": object
-}
-```
-
 ### 10.2 Resources
 
 #### 10.2.1 `identity` (REQUIRED)
@@ -817,7 +804,7 @@ In v0, all of `server_info` is **self-attested by the server**. The protocol doe
   },
   "conformance": {
     "required_tools": ["query_career", "list_claims", "get_claim"],
-    "recommended_tools": ["verify_claim"],
+    "recommended_tools": [],
     "attestation_levels_enforced": ["self_attested", "email_attested", "derived"]
   },
   "behaviors": {
@@ -985,6 +972,14 @@ Servers MAY implement these mechanisms ahead of v0.1 and declare them in `server
 **Value.** Disambiguates "12 fresh accesses by the recruiter" from "1 request whose response was cached and re-displayed 12 times" in the candidate's audit log. Composes with the request fingerprinting in §9.4.1 to give the candidate richer signal about what's happening on the other side of a tokenized URL.
 
 **Open questions.** Whether the nonce should be normatively required (transparency aid that all conforming clients SHOULD send) or remain a recommendation; transport binding (HTTP header vs. MCP `_meta` field on the JSON-RPC envelope); interaction with mid-stream cache layers that the candidate's server does not observe; whether the audit-log entry should distinguish "client sent a unique nonce" from "client did not send a nonce" from "client sent a previously-seen nonce" structurally rather than leaving it to UI interpretation.
+
+### 15.11 `verify_claim` tool
+
+**Mechanism.** A protocol-level MCP tool that re-runs verification on a single claim by ID. Behavior depends on attestation level: for source-verified claims (§15.3) the server would trigger a fresh check against the system of record; for issuer-attested claims (§15.4) it would re-validate the credential signature and check revocation status; for email-attested claims it would return the stored verification record. Output is a small structured envelope: `{ valid, verified_at, details }`.
+
+**Value.** Gives querying agents a uniform way to refresh trust signals over time without re-fetching the entire claim set. Particularly important for the cryptographic attestation levels in §15.3 and §15.4, where revocations and certificate expirations propagate to agents through this tool rather than through any push mechanism. v0 omits it because v0's two real attestation mechanisms (self and email) don't have meaningful re-verification semantics — the email challenge cannot be re-run after the fact, and self-attestation has nothing to verify.
+
+**Open questions.** Whether `verify_claim` should be REQUIRED or RECOMMENDED in v0.1 (probably REQUIRED once §15.3 or §15.4 land, since revocation propagation depends on it); rate-limiting and abuse considerations (re-verification triggers external system calls); behavior for derived claims (no-op, traverse to sources, or return aggregate status); structured `details` schema vs. free-form per attestation level.
 
 ## 16. References
 
