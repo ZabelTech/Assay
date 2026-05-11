@@ -616,8 +616,6 @@ Audience-bound tokens (where the server enforces that only a specific recipient 
 
 Token issuance is a candidate-side operation, performed through the candidate's hosting interface. It is **not** an MCP tool. The protocol's role is limited to defining the token format requirements and the server-side validation behaviors; the issuance UX, per-token controls, default expirations, and the revocation interface are implementation territory.
 
-This is deliberate. Earlier drafts included a `request_access` MCP tool through which a querying agent could ask the candidate for a token. That design conflated the cold-query layer with the conversation that follows a successful cold encounter, and was removed. Recruiters who want to engage a candidate they have discovered should reach out through the contact handles in the candidate's `identity` claim. The candidate, if interested, replies with a tokenized URL.
-
 ### 9.3 Revocation
 
 The candidate can revoke any issued token at any time. Servers MUST honor revocation immediately and MUST refuse subsequent requests bearing the revoked token. Servers SHOULD maintain a revocation list keyed by `token_id`.
@@ -633,7 +631,6 @@ Servers MUST log access events involving permissioned data. Each log entry MUST 
 - `audience_hint` and `purpose`, if set on the token.
 - `timestamp` — when the request was received.
 - `claim_ids_returned` — claims appearing in the response.
-- `request_nonce` — opaque per-request value supplied by the client, if any (§9.4.1).
 - `client_fingerprint` — a structured fingerprint of the requesting client (§9.4.1).
 
 Candidates MUST be able to view this log through their hosting interface.
@@ -642,7 +639,7 @@ For `query_career` requests (§10.1.1), the log entry MUST also record every sou
 
 The audit log is what makes token forwarding (§9.1) visible to the candidate. A bearer-style token forwarded across a hiring panel produces multiple distinct fingerprints under the same `token_id`; the candidate sees fan-out, not just count.
 
-### 9.4.1 Request fingerprinting and per-request nonces
+### 9.4.1 Request fingerprinting
 
 The protocol allows token forwarding by design (§9.1) — recruiters routinely share candidate links across hiring teams, and that should just work. But forwarding under a bearer token is also the main confidentiality leak: a single `token_id` may be exercised by an unknown number of accessors, and the candidate's audit log, keyed only by `token_id`, cannot distinguish "the recruiter visited the page 47 times" from "the link was forwarded to 47 different people."
 
@@ -677,12 +674,6 @@ Conforming servers MUST compute a per-request `client_fingerprint` and MUST surf
 |`components.client_identity`         |OPTIONAL|Stable identifier the client claims for itself. In v0 typically an email address.                    |
 
 Fingerprint composition MUST be deterministic. Conforming servers MUST include at minimum the two REQUIRED components; additional components SHOULD be included when available. Servers MUST document their fingerprint composition in `server_info.behaviors` (§10.3.1) so agents can reason about how stable the fingerprint will be across their requests.
-
-#### Per-request nonce (client-supplied)
-
-Conforming clients SHOULD include a `Cairn-Request-Nonce` header (or the MCP-transport equivalent metadata field) on each request, set to a fresh opaque value. The server records the value in the audit log. The nonce does not affect fingerprint identity; its purpose is to let the candidate distinguish distinct accesses from cache replay.
-
-Servers MUST NOT reject requests that omit the nonce. The nonce is a transparency aid, not an access control.
 
 #### Honest-signal client identity (client-supplied)
 
@@ -989,6 +980,14 @@ Servers MAY implement these mechanisms ahead of v0.1 and declare them in `server
 **Value.** Strongest email-attested form available short of bringing in a full DID. Domain-bound rather than user-bound, but for endorsers from corporate domains this is often what matters ("the endorser is genuinely at @stripe.com, not just someone who could read a forwarded email").
 
 **Open questions.** DKIM key rotation — the verification record's `verified_at` may fail to revalidate later if the DKIM key has rotated; whether to archive the DKIM key state at verification time; reply mailbox plumbing (operators need to host the reply address); how this composes with replied-via-mailing-list-server cases that strip or re-sign DKIM.
+
+### 15.10 Per-request nonces
+
+**Mechanism.** A client-supplied opaque per-request value (e.g. a `Cairn-Request-Nonce` header or MCP-transport equivalent metadata field) that the server records in the audit log alongside the request. The nonce does not affect access control — servers do not reject requests that omit it — and does not contribute to fingerprint identity. Its purpose is to let the candidate distinguish distinct accesses from cache replay or refresh in their audit log UI.
+
+**Value.** Disambiguates "12 fresh accesses by the recruiter" from "1 request whose response was cached and re-displayed 12 times" in the candidate's audit log. Composes with the request fingerprinting in §9.4.1 to give the candidate richer signal about what's happening on the other side of a tokenized URL.
+
+**Open questions.** Whether the nonce should be normatively required (transparency aid that all conforming clients SHOULD send) or remain a recommendation; transport binding (HTTP header vs. MCP `_meta` field on the JSON-RPC envelope); interaction with mid-stream cache layers that the candidate's server does not observe; whether the audit-log entry should distinguish "client sent a unique nonce" from "client did not send a nonce" from "client sent a previously-seen nonce" structurally rather than leaving it to UI interpretation.
 
 ## 16. References
 
