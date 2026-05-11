@@ -52,18 +52,75 @@ A *conforming client* MUST be able to consume any career object that validates a
 
 The subject of a career object MUST be identified by a [Decentralized Identifier (DID)](https://www.w3.org/TR/did-core/).
 
-Conforming servers MUST support the `did:web` method. Other DID methods (e.g., `did:key`, `did:ion`) MAY be supported.
+The canonical subject identifier is `did:key`. This method is host-independent: the identifier is derived directly from the subject's public key and can be resolved without any network call or hosting dependency. A subject who moves between hosts retains the same `did:key`, and credentials, tokens, and signatures bound to that identifier remain valid across the move. This is the property the protocol relies on to make a career portable across forty years and an unknown number of operators.
 
-A `did:web` identifier resolves to a DID Document hosted at `/.well-known/did.json` on the corresponding domain. Example:
+Conforming servers MUST support `did:key` as a subject identifier. Conforming servers SHOULD also support `did:web` as a complementary alias used for richer metadata — service endpoints, discoverable URLs, additional verification methods bound to a hosting context. Other DID methods (e.g., `did:ion`) MAY be supported.
+
+A `did:key` looks like:
 
 ```
-did:web:alice.career
-→ https://alice.career/.well-known/did.json
+did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK
 ```
 
-The DID Document MUST contain at least one verification method (public key) that can be used to verify signatures over claims and credentials issued by the subject.
+Resolution of `did:key` is deterministic: the public key is decoded from the multibase suffix and the DID Document is generated locally with no network call.
 
-Issuers and endorsers SHOULD also be identified by DIDs, so that signed claims can be cryptographically verified against a resolvable public key. For endorsers who do not yet have a DID, verified-email identity (§7.4) is permitted as a fallback, with the trust implications described there.
+### 4.1 The two-identifier pattern
+
+The protocol expects most subjects to publish a `did:key` as their canonical identifier and additionally host a `did:web` document that names the `did:key` in its `alsoKnownAs` array. The `did:web` provides discoverable, host-bound metadata; the `did:key` provides portable identity.
+
+A typical DID Document at `https://alice.career/.well-known/did.json`:
+
+```json
+{
+  "@context": "https://www.w3.org/ns/did/v1",
+  "id": "did:web:alice.career",
+  "alsoKnownAs": [
+    "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+  ],
+  "verificationMethod": [
+    {
+      "id": "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK#z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK",
+      "type": "Ed25519VerificationKey2020",
+      "controller": "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK",
+      "publicKeyMultibase": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+    }
+  ],
+  "service": [
+    {
+      "id": "#cairn",
+      "type": "CairnEndpoint",
+      "serviceEndpoint": "https://alice.career/mcp"
+    }
+  ]
+}
+```
+
+Career objects, claims, tokens, and credentials bound to the subject MUST use the `did:key` form as the value of `subject`, `iss`, and credential subject identifiers. The `did:web` MAY appear as an `alsoKnownAs` cross-reference or as a discoverable URL in `identity.handles` (§6.2), but is not the canonical identity.
+
+Querying agents that encounter a `did:web` subject in older or non-conforming data SHOULD resolve the DID Document and follow `alsoKnownAs` to the canonical `did:key` before reasoning about the subject's identity.
+
+### 4.2 Portability under host change
+
+A subject who moves between hosts:
+
+1. Stands up a new `did:web` at the new host with the same `did:key` in `alsoKnownAs`.
+2. Updates the old host's `did:web` (if still reachable) to redirect or deprecate.
+3. Re-issues any active permissioned tokens with `iss` set to the canonical `did:key`.
+4. Retains all credentials, signatures, and historical attestations bound to the `did:key` — none of them need to be re-issued, because none of them were bound to the host.
+
+This pattern makes the BYO-key requirement in §13 load-bearing: portability depends on the subject controlling the underlying signing key independently of the host. A subject whose key is held only by the hosted operator gains the structural benefit of `did:key` only as long as the operator continues to serve them.
+
+### 4.3 Key rotation
+
+`did:key` is bound to a single public key. Rotating the key changes the identifier. For long-lived professional identity, this is a significant constraint: a key compromise means identity loss, and there is no graceful rotation path within the `did:key` method alone.
+
+For v0, the spec accepts this constraint and recommends that subjects treat their `did:key` private key as long-lived material protected accordingly — hardware key storage, offline backups, custody discipline appropriate to a decade-plus lifetime. Subsidiary signing keys for routine use, such that the long-lived identity key signs only delegations, are deferred to a later version (§15).
+
+### 4.4 Identifiers for issuers, endorsers, and operators
+
+Issuers, endorsers, and server operators SHOULD also be identified by DIDs so that signed claims and metadata can be cryptographically verified against a resolvable public key.
+
+Organizations with persistent web hosting (employers, schools, certifying bodies, Cairn operators) SHOULD use `did:web`, since the discoverability and rich-metadata benefits outweigh portability concerns for entities with a stable web presence. Individuals (endorsers, self-hosted subjects) SHOULD use `did:key`. For endorsers who do not yet have any DID, verified-email identity (§7.4) is permitted as a fallback, with the trust implications described there.
 
 ## 5. The Career Object
 
@@ -77,7 +134,7 @@ A career object is the root document served by a Cairn endpoint. It has the foll
     "https://cairn.dev/schemas/v0"
   ],
   "schema_version": "cairn/0.1",
-  "subject": "did:web:alice.career",
+  "subject": "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK",
   "updated_at": "2026-05-10T14:32:00Z",
   "claims": [
     { ... },
@@ -85,7 +142,7 @@ A career object is the root document served by a Cairn endpoint. It has the foll
   ],
   "signature": {
     "alg": "EdDSA",
-    "key_id": "did:web:alice.career#key-1",
+    "key_id": "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK#z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK",
     "created_at": "2026-05-10T14:32:00Z",
     "value": "..."
   }
@@ -116,7 +173,7 @@ Every claim, regardless of type, has the following common shape:
 ```json
 {
   "claim_id": "clm_8f2a4c7d...",
-  "subject": "did:web:alice.career",
+  "subject": "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK",
   "type": "employment",
   "value": { ... },
   "evidence": [ ... ],
@@ -126,7 +183,7 @@ Every claim, regardless of type, has the following common shape:
   "updated_at": "2024-09-02T10:14:00Z",
   "signature": {
     "alg": "EdDSA",
-    "key_id": "did:web:alice.career#key-1",
+    "key_id": "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK#z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK",
     "created_at": "2024-09-02T10:14:00Z",
     "value": "..."
   }
@@ -372,7 +429,7 @@ Both the career-object signature and the claim signature use the same shape:
 ```json
 "signature": {
   "alg": "EdDSA",
-  "key_id": "did:web:alice.career#key-1",
+  "key_id": "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK#z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK",
   "created_at": "2026-05-10T14:32:00Z",
   "value": "base64url-encoded-signature-bytes"
 }
@@ -773,7 +830,7 @@ A token is a JWT with the following claims:
 
 ```json
 {
-  "iss": "did:web:alice.career",
+  "iss": "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK",
   "jti": "tok_a3f9...",
   "scope": "permissioned",
   "audience": "did:web:acme-recruiting.com",
@@ -786,7 +843,7 @@ A token is a JWT with the following claims:
 
 |Field          |Required   |Description                                                            |
 |---------------|-----------|-----------------------------------------------------------------------|
-|`iss`          |REQUIRED   |Issuer DID. MUST equal the career object's subject.                    |
+|`iss`          |REQUIRED   |Issuer DID. MUST equal the career object's canonical subject (the `did:key` form, per §4).|
 |`jti`          |REQUIRED   |Unique token identifier. Used for revocation and audit.                |
 |`scope`        |REQUIRED   |MUST be `"permissioned"` in v0. Reserved for future expansion.         |
 |`audience`     |OPTIONAL   |DID of the intended recipient. If present, servers MAY enforce binding.|
@@ -1065,7 +1122,7 @@ Breaking changes (incompatible field renames, semantic changes to existing field
 - Screenshots provide no cryptographic guarantees and MUST NOT be treated as elevating attestation under any circumstances.
 - Derived claims (§7.5) are server-mediated and inherit the trust of both the synthesizing server and their source claims. A compromised or malicious server can produce derived claims that misrepresent their sources; querying agents that depend on synthesis SHOULD weight `server_info` attestations accordingly and SHOULD be able to fall back to direct reasoning over `derived_from` source claims.
 - Verified-email endorsements (§7.4.2) depend on the integrity of the endorser's email account and on the honesty of the verifying server. Email accounts get compromised more easily than DID keys, and the verifying server is typically the candidate's own host — a conflict of interest exposed by `verifier_is_subject_host`. Agents SHOULD weight verified-email endorsements accordingly, and especially when both `verifier_is_subject_host: true` and `challenge_method: click_through_link` apply.
-- The subject's signing key is the most sensitive material on the candidate side. Hosted implementations MUST allow subjects to export their key and SHOULD support BYO-key configurations.
+- The subject's signing key is the most sensitive material on the candidate side. With `did:key` as the canonical subject identifier (§4), the signing key *is* the identity: loss of the key is loss of the identity, and possession of the key is sufficient to act as the subject. Hosted implementations MUST allow subjects to export their key and SHOULD support BYO-key configurations. The export MUST yield key material the subject can use to stand up a new endpoint at a different host (or self-hosted) without changing the canonical `did:key` identifier — this is what makes the portability property in §4.2 real rather than ceremonial.
 
 ## 14. Privacy considerations
 
@@ -1088,7 +1145,8 @@ The following are deliberately unresolved in v0:
 1. **Audience binding default.** Whether servers should default to enforcing audience binding on URL tokens (stricter, slightly more friction for normal recruiter forwarding) or to bearer-style access (looser, lower friction). Currently leaning bearer-style as default with audience-bound mode available.
 1. **Resource vs. tool access.** Whether the full career object should be exposed as an MCP resource, or whether all access should flow through tools.
 1. **Verification freshness semantics.** Whether the protocol should specify maximum acceptable ages for source-verified attestations, or leave this to clients.
-1. **Multi-DID subjects.** Whether a subject can have multiple DIDs (e.g., one personal, one professional) and how cross-references work.
+1. **Multi-DID subjects.** Whether a subject can have multiple DIDs (e.g., one personal, one professional) and how cross-references work. With the §4 two-identifier pattern this becomes specifically: how a subject can maintain multiple `did:web` aliases (different domains, different professional personas) against a single canonical `did:key`, and how agents should reason about partial overlap between such personas.
+1. **Subsidiary signing keys and rotation.** `did:key` (§4) is bound to a single public key and offers no graceful rotation path. A subsidiary-key model — where a long-lived identity key signs short-lived signing-key delegations, and routine signatures use the delegated keys — would preserve the canonical identifier across rotations. This is a substantive cryptographic addition deferred from v0 because it raises agent-side complexity (delegation chain verification) and benefits from coordination with the W3C DID Resolution and Verifiable Credentials work on key-management trust chains.
 1. **Single-use tokens.** Whether to standardize a single-use token mode for one-shot resume-equivalent shares, or leave it as an implementation extension.
 1. **X.509-to-DID mapping for embedded signatures.** PAdES signatures carry X.509 certificates with subject DNs, not DIDs. The mapping from X.509 subject to a Cairn issuer DID needs to be specified more precisely. Likely solution: a registry or trust list mapping known certificate authorities to canonical DIDs.
 1. **C2PA validation requirement level.** Whether to require C2PA validation for images in v0.1 (currently SHOULD), or wait until camera-side adoption is broader.
