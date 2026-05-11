@@ -87,7 +87,7 @@ A query and response, illustrative:
 }
 ```
 
-The candidate controls what's exposed, to whom, and for how long. A recruiter's access can be scoped to a single role, expire after a window, and leave an audit log the candidate owns.
+The candidate controls what's exposed, to whom, and for how long. A recruiter's access can be scoped to a single role, expire after a window, and leave an audit trail of what was requested and when — owned by the candidate, viewable through their hosting interface. (v0 records requests against tokens but does not yet identify distinct accessors within a forwarded chain; OAuth-based accessor identity is on the v0.1 path.)
 
 ## The trust spectrum
 
