@@ -872,9 +872,100 @@ Revocation affects only the specific token. URLs derived from other tokens — f
 
 ### 9.4 Audit logging
 
-Servers MUST log access events involving permissioned data. Each log entry MUST include at minimum: the token's `jti`, the `audience_hint` and `purpose` if set, the request timestamp, and the claim IDs returned. Candidates MUST be able to view this log through their hosting interface.
+Servers MUST log access events involving permissioned data. Each log entry MUST include at minimum:
+
+- `request_id` — a server-generated stable identifier for the request.
+- `jti` — the token's identifier (§9.1).
+- `audience_hint` and `purpose`, if set on the token.
+- `timestamp` — when the request was received.
+- `claim_ids_returned` — claims appearing in the response.
+- `request_nonce` — opaque per-request value supplied by the client, if any (§9.4.1).
+- `client_fingerprint` — a structured fingerprint of the requesting client (§9.4.1).
+
+Candidates MUST be able to view this log through their hosting interface.
 
 For `query_career` requests (§10.1.1), the log entry MUST also record every source claim consulted during selection or synthesis, not only the claim IDs returned to the requester. This makes it visible to the candidate when a server reasoned over permissioned data even if that data did not appear verbatim in the response.
+
+The audit log is what makes token forwarding (§9.1) visible to the candidate. A bearer-style token forwarded across a hiring panel produces multiple distinct fingerprints under the same `jti`; the candidate sees fan-out, not just count.
+
+### 9.4.1 Request fingerprinting and per-request nonces
+
+The protocol allows token forwarding by design (§9.1) — recruiters routinely share candidate links across hiring teams, and that should just work. But forwarding under a bearer token is also the main confidentiality leak: a single `jti` may be exercised by an unknown number of accessors, and the candidate's audit log, keyed only by `jti`, cannot distinguish "the recruiter visited the page 47 times" from "the link was forwarded to 47 different people."
+
+Conforming servers MUST compute a per-request `client_fingerprint` and MUST surface it in the audit log alongside the `jti`. The fingerprint is a deterministic function of observable per-request metadata plus any honest-signal identity the client supplies. Repeat accesses from the same client share a fingerprint; forwarded access from a new client produces a new one.
+
+#### Fingerprint shape
+
+```json
+"client_fingerprint": {
+  "id": "fp_d1c4e7...",
+  "first_seen_at": "2026-05-10T10:00:00Z",
+  "request_count": 12,
+  "components": {
+    "ip_prefix": "203.0.113.0/24",
+    "user_agent": "AcmeRecruit/2.1 MCP-Client/1.0",
+    "tls_ja3": "771,4865-4866-...",
+    "mcp_client_name": "AcmeRecruit",
+    "mcp_client_version": "2.1.0",
+    "client_identity": "did:web:acme-recruiting.com",
+    "client_identity_verified": false
+  }
+}
+```
+
+|Field                                |Required   |Description                                                                                          |
+|-------------------------------------|-----------|-----------------------------------------------------------------------------------------------------|
+|`id`                                 |REQUIRED   |Stable hash over the components. Requests from the same accessor share the same `id` within a `jti`. |
+|`first_seen_at`                      |REQUIRED   |Timestamp of the first observed request matching this fingerprint for the current `jti`.             |
+|`request_count`                      |REQUIRED   |Number of requests observed from this fingerprint under the current `jti`.                           |
+|`components.ip_prefix`               |REQUIRED   |Coarse-grained IP prefix. SHOULD be `/24` for IPv4, `/48` for IPv6. Full IPs MUST NOT be included.   |
+|`components.user_agent`              |REQUIRED   |User-Agent header sent by the client, truncated to 256 characters.                                   |
+|`components.tls_ja3`                 |OPTIONAL   |TLS ClientHello fingerprint, when the transport exposes it.                                          |
+|`components.mcp_client_name`         |OPTIONAL   |Client name from the MCP `initialize` handshake, if present.                                         |
+|`components.mcp_client_version`      |OPTIONAL   |Client version from the MCP `initialize` handshake, if present.                                      |
+|`components.client_identity`         |OPTIONAL   |Stable identifier the client claims for itself. SHOULD be a DID; MAY be an opaque string.            |
+|`components.client_identity_verified`|REQUIRED   |Boolean. `true` only if the server cryptographically verified the claimed identity (see below).      |
+
+Fingerprint composition MUST be deterministic: the same set of components in canonical order MUST produce the same `id`. Conforming servers MUST include at minimum the two REQUIRED components (IP prefix and User-Agent); additional components SHOULD be included when available. Servers MUST document their fingerprint composition in `server_info.behaviors` (§10.3.1) so agents can reason about how stable the fingerprint will be across their requests.
+
+#### Per-request nonce (client-supplied)
+
+Conforming clients SHOULD include a `Cairn-Request-Nonce` header (or the MCP-transport equivalent metadata field) on each request, set to a fresh opaque value. The server records the value in the audit log. The nonce does not affect fingerprint identity; its purpose is to let the candidate distinguish distinct accesses from cache replay in their own UI ("12 requests, 12 distinct nonces" vs "12 requests, 1 nonce repeated").
+
+Servers MUST NOT reject requests that omit the nonce. The nonce is a transparency aid, not an access control.
+
+#### Honest-signal client identity (client-supplied)
+
+Conforming clients SHOULD send a `Cairn-Client-Identity` header (or the MCP-transport equivalent) with a stable identifier they are willing to be known by — a DID where the client has one, an organizational identifier otherwise. Clients that omit this receive a fingerprint computed from server-observable signals only, which is necessarily coarser and more easily evaded.
+
+The asymmetry is the point: a mainstream MCP client that identifies itself produces a stable, recognizable fingerprint and earns proportionate trust from the candidate. An evasive client that omits identity, rotates IPs and User-Agents, and presents a different fingerprint on each request is visible to the candidate *as* an evasive client. Fingerprinting does not prevent forwarding; it makes forwarding-with-evasion structurally legible.
+
+#### Verified client identity (OPTIONAL)
+
+A server MAY require querying clients to cryptographically prove their claimed `client_identity` before serving permissioned claims. The verification flow:
+
+1. The server issues a per-session `challenge_nonce` (server-generated, unique).
+2. The client signs the challenge with the key bound to its claimed `client_identity` DID.
+3. The server verifies the signature against the client's DID Document.
+4. On success, the server records `client_identity_verified: true` for subsequent requests in the session.
+
+Verified identity is the strongest form of accessor attribution and MAY be required for audience-bound tokens (§9.1) — in which case the server MUST also confirm that the verified identity equals the token's `audience`. The challenge-response wire format is not standardized in v0; see §15.
+
+#### What fingerprinting does and does not defend against
+
+Fingerprinting makes token forwarding **visible to the candidate**. It does not prevent forwarding, does not invalidate forwarded URLs, and does not stop malicious clients from rotating their fingerprint by changing IPs and User-Agents between requests.
+
+Fingerprinting defends against:
+
+- Silent fan-out under a bearer token. The candidate sees that one `jti` is being exercised by multiple distinct accessors.
+- Accidental forwarding-to-a-wider-audience patterns (e.g., a recruiter pasting the URL into a Slack channel) where the new accessors don't bother to evade.
+
+Fingerprinting does **not** defend against:
+
+- A single recipient making many requests (no fan-out to detect).
+- Coordinated accessors using identical client configurations from different IPs deliberately designed to coalesce into one fingerprint.
+- Cached responses retained and re-shared by the original recipient without re-querying.
+- Re-identification of the candidate from the recruiter side; the protocol's fingerprinting is one-directional.
 
 ### 9.5 Tokens in URLs: security considerations
 
@@ -884,6 +975,7 @@ Tokens carried in URLs leak more easily than tokens carried in headers. They app
 - Servers MUST strip the token from their own access logs and SHOULD NOT include it in error responses or stack traces.
 - Querying clients SHOULD treat the URL as sensitive and SHOULD NOT display the full URL in user-facing output.
 - Tokens MUST have reasonable expirations. Implementations SHOULD default to 60–90 days and SHOULD NOT issue tokens with expirations longer than 1 year by default (longer-lived tokens MAY be issued with explicit candidate confirmation).
+- Servers MUST fingerprint requests over tokenized URLs (§9.4.1). This does not prevent forwarding — forwarding remains a supported pattern — but it makes forwarding visible to the candidate as distinct fingerprints under the same `jti`. Candidates can then revoke, follow up, or simply note the pattern.
 
 > **Open question.** Whether servers should support a "single-use" mode where a token is invalidated after first successful access. Useful for one-shot resume-equivalent shares; adds complexity for normal multi-query interactions. Currently leaning OPTIONAL.
 
@@ -1020,7 +1112,10 @@ A querying agent that lands on a Cairn endpoint needs to know what kind of serve
     "token_log_stripping": true,
     "audience_binding_default": "bearer",
     "subject_signing_supported": true,
-    "subject_key_custody": "byo_key"
+    "subject_key_custody": "byo_key",
+    "request_fingerprinting": true,
+    "fingerprint_components": ["ip_prefix", "user_agent", "mcp_client_name", "mcp_client_version", "client_identity"],
+    "client_identity_verification_supported": false
   },
   "attestations": [
     {
@@ -1037,6 +1132,8 @@ A querying agent that lands on a Cairn endpoint needs to know what kind of serve
 The `operator.type` field MUST be one of `hosted` (operated by a service provider), `self_hosted` (operated by the subject themselves), or `experimental` (development/research instance, not intended for production use).
 
 `behaviors.subject_signing_supported` declares whether the server produces subject signatures (§6.4) on career objects and claims. `behaviors.subject_key_custody` MUST be one of `operator_held` (the server controls the subject's signing key), `byo_key` (the subject controls the key, the server only relays signatures produced elsewhere), or `mixed` (the operator supports both modes and the choice is per-subject). Agents reasoning about signature trust SHOULD weight `byo_key` signatures more strongly than `operator_held` signatures; see §6.4.4.
+
+`behaviors.request_fingerprinting` declares whether the server fingerprints requests over tokenized URLs (§9.4.1). `behaviors.fingerprint_components` enumerates the components the server includes in the fingerprint, drawn from the set defined in §9.4.1; agents can use this to predict how stable their own fingerprint will be (more components → more stable for honest clients, more revealing of evasive ones). `behaviors.client_identity_verification_supported` declares whether the server offers the optional verified-identity challenge flow.
 
 #### 10.3.2 Self-attested vs attested metadata
 
@@ -1136,6 +1233,7 @@ Breaking changes (incompatible field renames, semantic changes to existing field
 - Querying agents SHOULD minimize the claims they request and retain. The principle of least privilege applies to careers as much as to APIs.
 - The subject's DID is a stable, public identifier. Implementations should make subjects aware that linking it across sites enables tracking.
 - Endorsers' email addresses are personal data. Servers MUST NOT disclose the local part of an endorser's email (§7.4.2) without explicit endorser opt-in during the verification flow, and MUST store the full address with the same protections applied to subject-private data. Servers SHOULD allow endorsers to revoke their endorsements and have their email records purged.
+- Request fingerprinting (§9.4.1) is bidirectional: it makes recruiters' access patterns visible to candidates, not just candidates' data visible to recruiters. Servers MUST coarse-grain IP information in the fingerprint (prefix only, never full IP), MUST NOT include fields that uniquely identify a natural person beyond what the agent has chosen to disclose via `client_identity`, MUST truncate User-Agent strings to a reasonable maximum, and MUST document fingerprint composition in `server_info.behaviors.fingerprint_components`. Querying clients SHOULD treat their `Cairn-Client-Identity` as published information — anything sent in that header may appear in the candidate's audit log indefinitely.
 
 ## 15. Open questions
 
@@ -1157,6 +1255,9 @@ The following are deliberately unresolved in v0:
 1. **Signed enumeration of claims.** Per-claim signatures (§6.4) defend against modification but not against the host omitting claims from a response. A signed enumeration — for example, a subject-signed Merkle root over `claim_id` values, or a per-response signed claim manifest — would close that gap, at the cost of additional ceremony on every read. Deferred to v0.1.
 1. **Signature algorithm portfolio.** v0 requires `EdDSA` (Ed25519) support. Whether `ES256K` (secp256k1) or `ES256` (P-256) should also be REQUIRED, given their prevalence in existing wallets and key-management systems, is deferred.
 1. **Whether to upgrade subject signatures from OPTIONAL to RECOMMENDED in v0.1.** The current design treats them as opt-in to ease initial implementation; once BYO-key infrastructure is more widely deployed, signing SHOULD likely become the default for hosted operators.
+1. **Verified-identity challenge format.** The optional verified-identity flow in §9.4.1 needs a standardized challenge-response wire format before it can be RECOMMENDED. The candidates are an MCP-native extension over the `initialize` handshake, or a counter-signed HTTP header pair. Deferred to v0.1.
+1. **Fingerprint composition normativity.** §9.4.1 requires `ip_prefix` and `user_agent` and treats the other components as OPTIONAL. Whether to specify a fixed minimum component set so fingerprints are comparable across servers, or to leave composition to implementations (currently the latter, with a SHOULD floor), is open.
+1. **Audit-log retention semantics.** Fingerprints persist information about querying agents on the candidate's side for as long as the audit log is retained. Whether to specify a default retention window, or to require subject-controlled retention policy declared in `server_info.behaviors`, is deferred.
 
 The following are now resolved:
 
