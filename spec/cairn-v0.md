@@ -700,8 +700,6 @@ Tokens carried in URLs leak more easily than tokens carried in headers. They app
 - Querying clients SHOULD treat the URL as sensitive and SHOULD NOT display the full URL in user-facing output.
 - Servers MUST fingerprint requests over tokenized URLs (§9.4.1). This does not prevent forwarding but makes forwarding visible to the candidate as distinct fingerprints under the same `token_id`.
 
-> **Open question.** Whether servers should support a "single-use" mode where a token is invalidated after first successful access. Useful for one-shot resume-equivalent shares; adds complexity for normal multi-query interactions. Currently leaning OPTIONAL.
-
 ## 10. Protocol surface
 
 A Cairn endpoint is an MCP server exposing the following tools and resources. Authorization is determined by the URL the client connects to (§9): tools called over the public URL return only `public` claims, while tools called over a tokenized URL return both `public` and `permissioned` claims, subject to the token's validity. `private` claims are never returned by any tool.
