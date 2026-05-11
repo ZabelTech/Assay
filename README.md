@@ -140,7 +140,7 @@ assay/
 
 The build path, in rough order of dependency:
 
-1. **Cairn Protocol v0 draft.** The core career object, the three-level attestation model (self / email / derived), the MCP tool surface a candidate's endpoint exposes, opaque-token permissioning, and request fingerprinting. Published openly for review before any implementation hardens around it.
+1. **Cairn Protocol v0 draft.** The core career object, the three-level attestation model (self / email / derived), the MCP tool surface a candidate's endpoint exposes, and opaque-token permissioning. Published openly for review before any implementation hardens around it.
 1. **Reference server.** TypeScript MCP server, runnable in a single Docker container, that implements the v0 spec end-to-end.
 1. **Hosted onboarding at assay.bot.** A one-click setup for candidates who don't want to run a server, on the same protocol as the self-hosted path.
 1. **Cairn Protocol v0.1.** The cryptographic mechanisms outlined in v0 §15 — Decentralized Identifiers, subject signatures, source-verified attestation via OAuth, issuer-attested via Verifiable Credentials, embedded document signature validation, signed JWT tokens. Each item is a separate RFC inside §15 and will land as it stabilizes.

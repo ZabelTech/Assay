@@ -26,7 +26,7 @@ Cairn governs the cold-query layer — the moment an agent first encounters a ca
 
 v0 deliberately ships with a minimal trust surface:
 
-- **In v0:** structured claims, email-attested endorsements, derived (server-synthesized) claims, evidence references with content hashes, opaque permissioning tokens, request fingerprinting, audit logging, visibility levels, and the MCP tool surface.
+- **In v0:** structured claims, email-attested endorsements, derived (server-synthesized) claims, evidence references with content hashes, opaque permissioning tokens, audit logging, visibility levels, and the MCP tool surface.
 - **Not in v0, outlined for v0.1 (§15):** Decentralized Identifiers, cryptographic signatures over claims or tokens, Verifiable Credentials, source-verified attestation via OAuth, issuer-attested credentials, embedded document/image signature validation, signed JWT tokens with audience binding, and counter-signed client identity.
 
 The v0 trust model is intentionally honest about its strength: email-attested endorsements are the strongest signal the protocol provides, and everything else is the candidate's word with structured supporting evidence for inspection. Stronger trust mechanisms are deferred to v0.1 so v0 can ship with a small implementation surface and so the design of the cryptographic mechanisms can be informed by what real querying agents need from the cold-query layer.
@@ -65,11 +65,11 @@ This separation matters for portability. A candidate who moves between hosts bri
 
 ### 4.1 Subject email verification
 
-A server MUST verify the subject's control of their email address before serving any career object for that subject. The verification flow follows the same email-challenge pattern used for endorser verification (§7.2): the server sends a challenge to the address and the candidate responds.
+A server MUST verify the subject's control of their email address before serving any career object for that subject. The verification flow follows the same email-challenge pattern used for endorser verification (§7.2): the server sends a challenge to the address and the candidate responds. Subject verification MUST use one of the challenge methods defined in §7.2.1 (`click_through_link` or `code_return`); the verification record SHOULD be stored in the same shape as the endorser `verification` object (§7.2), with the subject's email taking the place of the endorser's.
 
 Servers MUST NOT serve a career object whose subject has not completed verification, over either the public or any tokenized endpoint. There is no "unverified subject" state in v0; verification is a precondition for operating a Cairn endpoint with a given subject email.
 
-The verification record is stored alongside the subject and made available to the candidate through the hosting interface. The record is not exposed through the protocol — querying agents trust that the server is meeting this requirement on the basis of `server_info` and out-of-band assurances about the operator (§4.3).
+The subject verification record is stored alongside the subject and made available to the candidate through the hosting interface. The record is not exposed through the protocol — querying agents trust that the server is meeting this requirement on the basis of `server_info` and out-of-band assurances about the operator (§4.3).
 
 ### 4.2 Endorser identity
 
@@ -183,12 +183,13 @@ A position at an organization.
     "title": "Senior Software Engineer",
     "start_date": "2021-03-01",
     "end_date": "2024-08-15",
+    "status": "ended",
     "summary": "Worked on the financial reporting platform team."
   }
 }
 ```
 
-`end_date` MAY be null for current positions.
+`value.status` MUST be one of `current`, `ended`, or `undisclosed`. When `status` is `current`, `end_date` MUST be null. When `status` is `ended`, `end_date` MUST be set. When `status` is `undisclosed`, `end_date` MAY be null and the candidate is signaling that the end date is deliberately withheld; agents SHOULD distinguish this from a current position.
 
 #### `education`
 
@@ -278,10 +279,13 @@ Current openness to work. The protocol intentionally does not standardize an exh
     "status": "open_to_offers",
     "role_types": ["full_time", "contract"],
     "locations": { "remote": true, "cities": ["Berlin"] },
-    "earliest_start": "2026-07-01"
+    "earliest_start": "2026-07-01",
+    "valid_until": "2026-08-15"
   }
 }
 ```
+
+`value.valid_until` is RECOMMENDED. When present, querying agents SHOULD treat the availability claim as stale after that date and weight it accordingly. When absent, agents SHOULD treat the claim's `updated_at` as an upper bound on freshness and SHOULD discount availability claims whose `updated_at` is older than a few months.
 
 #### `preference`
 
@@ -300,7 +304,8 @@ A claim about compensation. The `value.type` field discriminates between current
     "base_max": 220000,
     "currency": "EUR",
     "equity_required": true,
-    "structure_notes": "Open to lower base with strong equity at early-stage."
+    "structure_notes": "Open to lower base with strong equity at early-stage.",
+    "as_of": "2026-05-10"
   },
   "visibility": "permissioned"
 }
@@ -471,7 +476,6 @@ A document is a file containing structured or semi-structured information that s
 ```json
 {
   "type": "document",
-  "evidence_id": "ev_8f2a4c7d...",
   "document_url": "https://alice.career/evidence/offer-stripe.pdf",
   "content_hash": "sha256:8f2a4c7d...",
   "media_type": "application/pdf",
@@ -491,7 +495,6 @@ A document is a file containing structured or semi-structured information that s
 
 |Field         |Required   |Description                                                                                                            |
 |--------------|-----------|-----------------------------------------------------------------------------------------------------------------------|
-|`evidence_id` |REQUIRED   |Stable identifier for this evidence object.                                                                            |
 |`document_url`|REQUIRED   |Where the document can be retrieved. SHOULD respect the parent claim's visibility.                                     |
 |`content_hash`|REQUIRED   |SHA-256 (or stronger) hash of the document contents, format `algo:hexdigest`.                                          |
 |`media_type`  |REQUIRED   |IANA media type.                                                                                                       |
@@ -513,7 +516,6 @@ A photograph or visual artifact supporting a claim. Common examples: photographs
 ```json
 {
   "type": "image",
-  "evidence_id": "ev_d1c4...",
   "image_url": "https://alice.career/evidence/badge-acme.jpg",
   "content_hash": "sha256:d1c4...",
   "media_type": "image/jpeg",
@@ -540,7 +542,6 @@ Screenshots are deliberately a distinct evidence type — not a subtype of `imag
 ```json
 {
   "type": "screenshot",
-  "evidence_id": "ev_a3f9...",
   "image_url": "https://alice.career/evidence/slack-tech-lead.png",
   "content_hash": "sha256:a3f9...",
   "media_type": "image/png",
@@ -600,7 +601,7 @@ A v0 token is an **opaque random string** generated by the issuing server. It ca
 
 Tokens MUST be generated using a cryptographically secure random source with at least 128 bits of entropy. Servers MUST verify the token's existence, expiry, and revocation status on every request before serving permissioned claims.
 
-v0 tokens are **bearer-style**: any client holding the URL can use it. Recipients routinely forward candidate links within their hiring teams (to a hiring manager, to a panel, to an ATS), and that should just work. Fan-out from forwarding is made visible to the candidate via request fingerprinting (§9.4.1) rather than prevented at the access-control layer.
+v0 tokens are **bearer-style**: any client holding the URL can use it. Recipients routinely forward candidate links within their hiring teams (to a hiring manager, to a panel, to an ATS), and that should just work. v0 does not provide a mechanism to distinguish distinct accessors within a forwarded chain — the candidate's audit log shows the count of requests per `token_id` but not who made them. OAuth-based client identity (§15) and audience-bound tokens (also §15) are the v0.1 mechanisms that close this gap; in v0 the trade-off is accepted in exchange for the operational simplicity of bearer-style sharing.
 
 Audience-bound tokens (where the server enforces that only a specific recipient can use the URL) require cryptographic mechanisms outlined in §15.
 
@@ -660,65 +661,12 @@ Servers MUST log access events involving permissioned data. Each log entry MUST 
 - `audience_hint` and `purpose`, if set on the token.
 - `timestamp` — when the request was received.
 - `claim_ids_returned` — claims appearing in the response.
-- `client_fingerprint` — a structured fingerprint of the requesting client (§9.4.1).
 
-Candidates MUST be able to view this log through their hosting interface.
+The audit log is **candidate-private**. It is made available to the subject through their hosting interface and is not exposed through any MCP tool or resource. A querying agent cannot fetch its own audit-log entries.
 
 For `query_career` requests (§10.1.1), the log entry MUST also record every source claim consulted during selection or synthesis, not only the claim IDs returned to the requester. This makes it visible to the candidate when a server reasoned over permissioned data even if that data did not appear verbatim in the response.
 
-The audit log is what makes token forwarding (§9.1) visible to the candidate. A bearer-style token forwarded across a hiring panel produces multiple distinct fingerprints under the same `token_id`; the candidate sees fan-out, not just count.
-
-### 9.4.1 Request fingerprinting
-
-The protocol allows token forwarding by design (§9.1) — recruiters routinely share candidate links across hiring teams, and that should just work. But forwarding under a bearer token is also the main confidentiality leak: a single `token_id` may be exercised by an unknown number of accessors, and the candidate's audit log, keyed only by `token_id`, cannot distinguish "the recruiter visited the page 47 times" from "the link was forwarded to 47 different people."
-
-Conforming servers MUST compute a per-request `client_fingerprint` and MUST surface it in the audit log alongside the `token_id`. The fingerprint is a deterministic function of observable per-request metadata plus any honest-signal identity the client supplies. Repeat accesses from the same client share a fingerprint; forwarded access from a new client produces a new one.
-
-#### Fingerprint shape
-
-```json
-"client_fingerprint": {
-  "id": "fp_d1c4e7...",
-  "first_seen_at": "2026-05-10T10:00:00Z",
-  "request_count": 12,
-  "components": {
-    "ip_prefix": "203.0.113.0/24",
-    "user_agent": "AcmeRecruit/2.1 MCP-Client/1.0",
-    "mcp_client_name": "AcmeRecruit",
-    "mcp_client_version": "2.1.0",
-    "client_identity": "talent@acme-recruiting.com"
-  }
-}
-```
-
-|Field                                |Required|Description                                                                                          |
-|-------------------------------------|--------|-----------------------------------------------------------------------------------------------------|
-|`id`                                 |REQUIRED|Stable hash over the components. Requests from the same accessor share the same `id` within a `token_id`.|
-|`first_seen_at`                      |REQUIRED|Timestamp of the first observed request matching this fingerprint for the current `token_id`.       |
-|`request_count`                      |REQUIRED|Number of requests observed from this fingerprint under the current `token_id`.                     |
-|`components.ip_prefix`               |REQUIRED|Coarse-grained IP prefix. SHOULD be `/24` for IPv4, `/48` for IPv6. Full IPs MUST NOT be included.   |
-|`components.user_agent`              |REQUIRED|User-Agent header sent by the client, truncated to 256 characters.                                   |
-|`components.mcp_client_name`         |OPTIONAL|Client name from the MCP `initialize` handshake, if present.                                         |
-|`components.mcp_client_version`      |OPTIONAL|Client version from the MCP `initialize` handshake, if present.                                      |
-|`components.client_identity`         |OPTIONAL|Stable identifier the client claims for itself. In v0 typically an email address.                    |
-
-Fingerprint composition MUST be deterministic. Conforming servers MUST include at minimum the two REQUIRED components; additional components SHOULD be included when available. Servers MUST document their fingerprint composition in `server_info.behaviors` (§10.3.1) so agents can reason about how stable the fingerprint will be across their requests.
-
-#### Honest-signal client identity (client-supplied)
-
-Conforming clients SHOULD send a `Cairn-Client-Identity` header (or the MCP-transport equivalent) with a stable identifier they are willing to be known by — in v0 typically an email address, organizational identifier, or domain. Clients that omit this receive a fingerprint computed from server-observable signals only, which is necessarily coarser and more easily evaded.
-
-The asymmetry is the point: a mainstream MCP client that identifies itself produces a stable, recognizable fingerprint and earns proportionate trust from the candidate. An evasive client that omits identity, rotates IPs and User-Agents, and presents a different fingerprint on each request is visible to the candidate *as* an evasive client.
-
-Cryptographic verification of client identity (counter-signed challenge-response) is outlined in §15.
-
-#### What fingerprinting does and does not defend against
-
-Fingerprinting makes token forwarding visible to the candidate. It does not prevent forwarding, does not invalidate forwarded URLs, and does not stop malicious clients from rotating their fingerprint by changing IPs and User-Agents between requests.
-
-Defends against: silent fan-out under a bearer token, accidental forward-to-Slack patterns.
-
-Does not defend against: a single recipient making many requests (no fan-out to detect), coordinated accessors using identical client configurations from different IPs deliberately designed to coalesce into one fingerprint, cached responses retained and re-shared by the original recipient without re-querying.
+v0 does not provide a structural mechanism for distinguishing distinct accessors within a single `token_id`. A bearer-style token forwarded across a hiring panel produces audit-log entries keyed only by `token_id`; the candidate sees that the token has been used N times but cannot see whether those N requests came from the same recipient or from N forwarded recipients. OAuth-based client identity (§15) is the v0.1 mechanism that closes this gap.
 
 ### 9.5 Tokens in URLs: security considerations
 
@@ -727,16 +675,15 @@ Tokens carried in URLs leak more easily than tokens carried in headers. They app
 - Servers MUST require HTTPS for tokenized URLs.
 - Servers MUST strip the token from their own access logs and SHOULD NOT include it in error responses or stack traces.
 - Querying clients SHOULD treat the URL as sensitive and SHOULD NOT display the full URL in user-facing output.
-- Servers MUST fingerprint requests over tokenized URLs (§9.4.1). This does not prevent forwarding but makes forwarding visible to the candidate as distinct fingerprints under the same `token_id`.
 - Servers MUST NOT honor a token presented in the HTTP `Referer` header. Only the three forms defined in §9.1.1 (`Authorization` header, `?t=` query, `/t/` path) are valid credential carriers. When a tokenized URL is rendered in a browser context — for example, a recruiter previewing the link before pasting it into a tool — the browser may attach the full URL, including the token, to the `Referer` of subsequent outbound requests. Treating `Referer`-presented tokens as valid would turn that incidental leak into authenticated access.
 - Servers using framework auto-routers MUST verify that the `/t/<token>` path segment is consumed by the auth layer before normal request dispatch. A careless router may route `/mcp/t/abc/initialize` to a different handler than `/mcp/initialize` or fail to find a handler at all. Implementations SHOULD include a smoke test that exercises both URL forms and the header form against the same endpoint.
-- Servers that intend to accept browser-based MCP clients MUST set the appropriate CORS response headers to allow the `Authorization` request header (typically `Access-Control-Allow-Headers: Authorization` plus the relevant origin allowance). Without this, browser clients that strip the URL token into the header form (§9.1.1) cannot complete cross-origin requests.
+- Servers that intend to accept browser-based MCP clients MUST set appropriate CORS response headers: at minimum `Access-Control-Allow-Headers: Authorization` to permit the bearer-token header, `Access-Control-Allow-Origin` set to the specific origin(s) the candidate has authorized (or `*` if the endpoint is fully public and no credentials are involved), and correct preflight handling for non-simple requests. Servers SHOULD NOT use `Access-Control-Allow-Credentials: true` unless the candidate's hosting UI is itself a browser application; cookies are not part of v0's authentication model. Browser clients that strip the URL token into the header form (§9.1.1) cannot complete cross-origin requests without these headers.
 
 ## 10. Protocol surface
 
 A Cairn endpoint is an MCP server exposing the following tools and resources. Authorization is determined by the presence and validity of a token on each request (§9.1.1): requests without a valid token return only `public` claims, while requests carrying a valid token in any accepted form (header, query, or path) return both `public` and `permissioned` claims. `private` claims are never returned by any tool.
 
-The MCP `tools/list` and `resources/list` primitives MUST return the complete list of tools and resources the server implements, regardless of whether the requesting client is authenticated. Permissions are enforced at call time, not at discovery time. The presence of permissioned tools is not hidden information; their *contents* are. This is consistent with how MCP clients typically reason about server surfaces — a client expects to know what tools exist before it can decide whether it has the credentials to use them.
+The MCP `initialize` handshake MUST advertise the same capabilities regardless of authentication state. The MCP `tools/list` and `resources/list` primitives MUST return the complete list of tools and resources the server implements, regardless of whether the requesting client is authenticated. Permissions are enforced at call time, not at discovery time. The presence of permissioned tools is not hidden information; their *contents* are. This is consistent with how MCP clients typically reason about server surfaces — a client expects to know what tools exist before it can decide whether it has the credentials to use them.
 
 ### 10.1 Tools
 
@@ -844,9 +791,7 @@ In v0, all of `server_info` is **self-attested by the server**. The protocol doe
   "behaviors": {
     "default_compensation_visibility": "private",
     "audit_logging": true,
-    "token_log_stripping": true,
-    "request_fingerprinting": true,
-    "fingerprint_components": ["ip_prefix", "user_agent", "mcp_client_name", "mcp_client_version", "client_identity"]
+    "token_log_stripping": true
   },
   "v0_1_extensions_supported": []
 }
@@ -861,6 +806,30 @@ The `operator.type` field MUST be one of `hosted` (operated by a service provide
 Servers MUST NOT include free-text "about us" or "trust statements" in `server_info`. The metadata is structured and factual by design. Implementations that wish to provide marketing content about themselves SHOULD do so on their `vendor_url` or `operator.privacy_policy_url`, not through the protocol.
 
 Servers MUST NOT include numerical "trust scores," "reliability ratings," or other self-reported aggregate trust signals. The trust spectrum is the same one used for claim attestation: levels are determined by the attestation mechanism used, not by any number the server chose.
+
+### 10.4 Error model
+
+Cairn errors are reported through MCP's underlying JSON-RPC 2.0 error mechanism. Conforming servers MUST return errors as JSON-RPC error objects with a `code`, a human-readable `message`, and an optional `data` object carrying structured context. Conforming clients MUST be able to parse JSON-RPC errors regardless of `code` value and SHOULD distinguish the v0 codes below for actionable handling.
+
+Cairn-specific error codes are drawn from the JSON-RPC server-error range (`-32099` to `-32000`) reserved for application use:
+
+|Code    |Symbol               |When raised                                                                                  |
+|--------|---------------------|---------------------------------------------------------------------------------------------|
+|`-32001`|`token_invalid`      |The presented token is unrecognized or malformed.                                            |
+|`-32002`|`token_expired`      |The presented token has passed its `expires_at`.                                             |
+|`-32003`|`token_revoked`      |The presented token has been revoked.                                                        |
+|`-32004`|`token_mismatch`     |The request carries the token in multiple forms (§9.1.1) and the values disagree.            |
+|`-32005`|`claim_not_visible`  |The requested `claim_id` exists but is not visible to the current requester. Returned by `get_claim`.|
+|`-32006`|`claim_not_found`    |The requested `claim_id` does not exist in the career object.                                |
+|`-32007`|`subject_unverified` |The server is misconfigured: the career object's subject has not completed verification (§4.1). A correctly operating server MUST NOT serve at all in this state; the code exists for use by reference implementations during the verification onboarding flow.|
+|`-32008`|`malformed_input`    |The tool input does not validate against the input schema (e.g., missing required field).    |
+|`-32009`|`rate_limited`       |The requester has been rate-limited. The `data` object SHOULD include a `retry_after_seconds` field.|
+
+Servers MAY define additional implementation-specific error codes using the application-error range, namespaced via the `data.namespace` field to avoid collisions with future Cairn-standard codes.
+
+`claim_not_visible` vs. `claim_not_found`: a `claim_not_visible` response reveals that a claim with the requested ID exists at some visibility level the requester cannot access. This is information leakage and is intentional — the alternative (returning `claim_not_found` for both cases) would let a misbehaving client probe for permissioned claim existence by ID. Servers that prefer not to leak existence MAY collapse both to `claim_not_found`; agents reasoning across multiple servers should treat the two codes as informationally equivalent.
+
+For HTTP transport, the JSON-RPC error envelope is returned as the response body with HTTP status `200` per JSON-RPC convention. Servers MAY additionally return HTTP-level status codes for transport-layer failures (401 for missing credentials at the transport layer, 400 for malformed JSON, 503 for server unavailable); JSON-RPC error responses MUST remain inside `200` responses to preserve client parsing.
 
 ## 11. Versioning
 
@@ -882,8 +851,10 @@ The v0.1 release is expected to add the cryptographic mechanisms outlined in §1
 - Derived claims (§7.3) are server-mediated and inherit the trust of both the synthesizing server and their source claims. A compromised or malicious server can produce derived claims that misrepresent their sources; querying agents that depend on synthesis SHOULD be able to fall back to direct reasoning over `derived_from` source claims.
 - Email-attested endorsements (§7.2) depend on the integrity of the endorser's email account and on the honesty of the verifying server. Email accounts get compromised; the verifying server is typically the candidate's own host (exposed by `verifier_is_subject_host`) and has a conflict of interest. Agents SHOULD weight email-attested claims accordingly.
 - v0 does not provide cryptographic protection of any kind against host tampering with the career object. A malicious host can demote `private` claims to `public`, rewrite attestation metadata, fabricate claims, or forge audit log entries, and no v0 mechanism will detect this. Querying agents that need integrity guarantees against the host should require the host to support the subject signature mechanism outlined in §15.
+- Email compromise is identity hijack in v0. Because the subject is identified by their email address (§4) and verification consists of demonstrating control of that address, anyone who reads the subject's mailbox can stand up a Cairn endpoint claiming to be that subject — at any URL, under any operator. The TLS certificate confirms which domain the agent reached, not who is operating the server behind it. Candidates SHOULD secure the email address used as their Cairn subject with strong authentication; agents that need stronger identity assurance are dependent on the v0.1 DID and signature mechanisms outlined in §15.
 - Operator identity is unverified in v0. The `operator.url`, `operator.name`, `operator.contact_email`, and other identity fields in `server_info` (§10.3.1) are self-attested strings. A malicious operator can populate these with any values, including impersonating a reputable provider. Agents reasoning about operator identity in v0 depend on out-of-band assurances — the TLS certificate confirms which domain the agent is talking to, not who is operating the server behind it. Cryptographic operator attestation (signed third-party credentials confirming the operator's legal identity) is part of the §15 RFC set and lands in v0.1.
-- Server behavior declarations in `server_info.behaviors` — `audit_logging`, `token_log_stripping`, `request_fingerprinting`, fingerprint composition, and similar — are self-attested. The protocol provides no way to verify that a server actually does what it claims to do in this object. This is an accepted v0 limitation, mitigated by `server_info` being structured and factual (§10.3.2) and by the v0.1 conformance-attestation mechanism (§15) that will let independent auditors sign claims about server behavior.
+- Server behavior declarations in `server_info.behaviors` — `audit_logging`, `token_log_stripping`, and similar — are self-attested. The protocol provides no way to verify that a server actually does what it claims to do in this object. This is an accepted v0 limitation, mitigated by `server_info` being structured and factual (§10.3.2) and by the v0.1 conformance-attestation mechanism (§15) that will let independent auditors sign claims about server behavior.
+- Implementations SHOULD bound the size of individual career objects, individual claims, and evidence files (`document_url`, `image_url`). Querying agents SHOULD be prepared to handle truncation or outright refusal of oversized responses. v0 does not specify numerical limits; reference implementations are encouraged to publish theirs alongside the deployment. Without size discipline, a hostile career object can be used to exhaust client resources.
 
 ## 13. Privacy considerations
 
@@ -896,7 +867,6 @@ The v0.1 release is expected to add the cryptographic mechanisms outlined in §1
 - Servers SHOULD support encrypted-at-rest storage of original (unredacted) documents accessible only to the candidate, with only redacted copies exposed to the protocol.
 - Querying agents SHOULD minimize the claims they request and retain. The principle of least privilege applies to careers as much as to APIs.
 - Endorsers' email addresses are personal data. Servers MUST NOT disclose the local part of an endorser's email (§7.2) without explicit endorser opt-in during the verification flow, and MUST store the full address with the same protections applied to subject-private data. Servers SHOULD allow endorsers to revoke their endorsements and have their email records purged.
-- Request fingerprinting (§9.4.1) is bidirectional: it makes recruiters' access patterns visible to candidates, not just candidates' data visible to recruiters. Servers MUST coarse-grain IP information in the fingerprint (prefix only, never full IP), MUST NOT include fields that uniquely identify a natural person beyond what the agent has chosen to disclose via `client_identity`, MUST truncate User-Agent strings to a reasonable maximum, and MUST document fingerprint composition in `server_info.behaviors.fingerprint_components`.
 - The subject's email is a stable identifier across hosts. Implementations should make subjects aware that exposing it as a `public` `identity` handle enables linkage across sites.
 
 ## 14. Open questions in v0
@@ -909,10 +879,7 @@ The following are deliberately unresolved within v0's scope:
 1. **Single-use tokens.** Whether to standardize a single-use token mode for one-shot resume-equivalent shares, or leave it as an implementation extension.
 1. **Derivation method vocabulary.** Whether to standardize an enum of `method` values for derived claims (§7.3) — e.g. `llm_summary`, `aggregation`, `temporal_filter`, `selection_only` — so agents can mechanically reason about synthesis trust rather than parsing free-text labels.
 1. **Derived-claim freshness semantics.** A `derived` claim's `derived_at` reflects synthesis time, not the freshness of underlying source claims. Whether agents should be required to surface the oldest timestamp among `derived_from` source claims rather than the synthesis timestamp.
-1. **Fingerprint composition normativity.** §9.4.1 requires `ip_prefix` and `user_agent` and treats the other components as OPTIONAL. Whether to specify a fixed minimum component set so fingerprints are comparable across servers.
-1. **Audit-log retention semantics.** Fingerprints persist information about querying agents on the candidate's side for as long as the audit log is retained. Whether to specify a default retention window.
-1. **`availability` freshness.** This claim type is volatile and has no TTL. Whether to require a `valid_until` field or define a max-age beyond which `availability` claims SHOULD be ignored.
-1. **`employment.end_date: null` ambiguity.** Currently means "current position" but is indistinguishable from "redacted" or "unfilled." Whether to add an explicit discriminator.
+1. **Audit-log retention semantics.** Whether to specify a default retention window for audit log entries, or to require subject-controlled retention policy declared in `server_info.behaviors`.
 
 Resolved in v0:
 
@@ -922,6 +889,9 @@ Resolved in v0:
 - **`query_career` output shape** — resolved as claim-shaped only. The tool returns `Claim[]` and no free-text `answer` or self-reported `confidence` score. Synthesis is permitted but MUST flow through the `derived` attestation level (§7.3).
 - **Endorser identity floor in v0** — resolved as email-only. DID-signed endorsements are outlined for v0.1 (§15.5).
 - **Subject identity** — resolved as email-based for v0 (§4). DID-based identity is outlined for v0.1 (§15.1).
+- **`availability` freshness** — resolved by adding a RECOMMENDED `valid_until` field to the `availability` claim type (§6.2); when absent, agents discount based on the claim's `updated_at`.
+- **`employment.end_date: null` ambiguity** — resolved by adding a required `status` discriminator (`current`, `ended`, or `undisclosed`) on the `employment` claim's `value` (§6.2).
+- **Token fan-out detection in v0** — resolved as not provided. v0 audit logs are keyed by `token_id` only; distinguishing distinct accessors within a forwarded chain is deferred to v0.1's OAuth-based client identity (§15.8). The trade-off is accepted in exchange for the operational simplicity of bearer-style sharing.
 
 ## 15. Request for comments toward v0.1
 
@@ -985,13 +955,17 @@ Servers MAY implement these mechanisms ahead of v0.1 and declare them in `server
 
 **Open questions.** Coexistence with v0 opaque tokens (do servers support both? on a per-token basis?); challenge-response wire format (HTTP header pair, MCP `_meta` field, or a new MCP primitive); UX impact of audience binding on normal recruiter forwarding patterns within hiring teams.
 
-### 15.8 Counter-signed client identity
+### 15.8 OAuth-based client identity
 
-**Mechanism.** Querying clients optionally cryptographically prove their claimed `client_identity` (§9.4.1) by signing a server-issued challenge nonce with the key bound to their identity DID. On success, the server records `client_identity_verified: true` in the fingerprint, and the candidate's audit log distinguishes verified accessors from those claiming an identity without proof.
+**Mechanism.** Querying clients authenticate against a recognized identity provider (their employer's IdP, a generic provider like Google or Microsoft, or a recruiter-specific OAuth server) and present the resulting identity to Cairn endpoints alongside the existing bearer-token credential. The identity is a verifiable assertion of "this request is being made by *this person* at *this organization*," issued by a third party the candidate's server can independently trust, not a string the client typed.
 
-**Value.** Closes the gap where evasive clients can claim a stable identity for fingerprint stability without actually being that identity. Required for any token model that wants to enforce audience binding.
+Concretely, the querying agent obtains an ID token (OIDC) or short-lived access token bound to a known subject, attaches it to each Cairn request via a defined header (e.g. `Cairn-Client-Identity-Token`), and the Cairn server verifies it against the issuer's published JWKS before recording the resolved identity (email, `sub`, issuer) in the audit log.
 
-**Open questions.** Challenge-response wire format (likely the same as §15.7); how verified identity persists across an MCP session vs. requiring re-verification per request; how this interacts with v0's bearer-style tokens (probably it doesn't — counter-signed identity is most valuable alongside audience-bound tokens).
+**Value.** This is the v0.1 mechanism that closes the token-fan-out gap deferred in v0 (§9.1). Under v0, a bearer-style token forwarded across a hiring panel produces audit-log entries keyed only by `token_id` — the candidate sees that the link has been used N times but cannot tell whether by one recipient or N. With OAuth client identity, every distinct accessor surfaces in the audit log as a verified person from a verified domain, regardless of whether they reached the URL through forwarding or direct sharing.
+
+It also unlocks audience-bound tokens (§15.7) without requiring DIDs: the candidate issues a token bound to `bob@acme.com`, the server enforces that only requests carrying a valid OIDC token resolving to `bob@acme.com` may use it.
+
+**Open questions.** Which IdPs Cairn servers should trust by default (Google, Microsoft Entra, common recruiting-platform OAuth providers, candidate-configurable allow-lists); whether to require OIDC specifically or accept any OAuth 2.1 bearer profile with a verifiable subject claim; how to handle clients that have no OAuth identity to present (refuse the request, fall back to anonymous, or record the absence as an audit signal in its own right); session semantics — does identity verify once per MCP `initialize` handshake and persist, or per request; interaction with the candidate's hosting interface for managing which IdPs and which domains are accepted on a given token.
 
 ### 15.9 DKIM-verified signed-reply email attestation
 
@@ -1003,9 +977,9 @@ Servers MAY implement these mechanisms ahead of v0.1 and declare them in `server
 
 ### 15.10 Per-request nonces
 
-**Mechanism.** A client-supplied opaque per-request value (e.g. a `Cairn-Request-Nonce` header or MCP-transport equivalent metadata field) that the server records in the audit log alongside the request. The nonce does not affect access control — servers do not reject requests that omit it — and does not contribute to fingerprint identity. Its purpose is to let the candidate distinguish distinct accesses from cache replay or refresh in their audit log UI.
+**Mechanism.** A client-supplied opaque per-request value (e.g. a `Cairn-Request-Nonce` header or MCP-transport equivalent metadata field) that the server records in the audit log alongside the request. The nonce does not affect access control — servers do not reject requests that omit it. Its purpose is to let the candidate distinguish distinct accesses from cache replay or refresh in their audit log UI.
 
-**Value.** Disambiguates "12 fresh accesses by the recruiter" from "1 request whose response was cached and re-displayed 12 times" in the candidate's audit log. Composes with the request fingerprinting in §9.4.1 to give the candidate richer signal about what's happening on the other side of a tokenized URL.
+**Value.** Disambiguates "12 fresh accesses by the recruiter" from "1 request whose response was cached and re-displayed 12 times" in the candidate's audit log. Composes with OAuth-based client identity (§15.8) to give the candidate richer signal about what's happening on the other side of a tokenized URL: who accessed (from §15.8) and how often each access was actually a fresh fetch (from this nonce).
 
 **Open questions.** Whether the nonce should be normatively required (transparency aid that all conforming clients SHOULD send) or remain a recommendation; transport binding (HTTP header vs. MCP `_meta` field on the JSON-RPC envelope); interaction with mid-stream cache layers that the candidate's server does not observe; whether the audit-log entry should distinguish "client sent a unique nonce" from "client did not send a nonce" from "client sent a previously-seen nonce" structurally rather than leaving it to UI interpretation.
 
