@@ -8,6 +8,7 @@ import type { Database } from "better-sqlite3";
 import type { AdminTokensRepo } from "../storage/admin_tokens.repo.js";
 import type { AuditRepo } from "../storage/audit.repo.js";
 import type { ClaimsRepo } from "../storage/claims.repo.js";
+import type { HandlesRepo } from "../storage/handles.repo.js";
 import type { SubjectRepo } from "../storage/subject.repo.js";
 import type { TokensRepo } from "../storage/tokens.repo.js";
 import type { EvidenceStore } from "../adapters/evidence_store.js";
@@ -87,6 +88,7 @@ export interface BuildAppDeps {
 	audit: AuditRepo;
 	subjects: SubjectRepo;
 	adminTokens: AdminTokensRepo;
+	handles: HandlesRepo;
 	evidenceStore: EvidenceStore;
 	mailer: Mailer;
 	synthesizer: Synthesizer;
@@ -144,12 +146,14 @@ export function buildApp(depsIn: BuildAppDeps) {
 	mountAdminRoutes(app, {
 		subject: deps.subject,
 		operatorUrl: deps.operatorUrl,
+		operatorType: deps.operatorType ?? "self_hosted",
 		db: deps.db,
 		adminTokens: deps.adminTokens,
 		subjects: deps.subjects,
 		claims: deps.claims,
 		tokens: deps.tokens,
 		audit: deps.audit,
+		handles: deps.handles,
 		mailer: deps.mailer,
 		evidenceStore: deps.evidenceStore,
 	});

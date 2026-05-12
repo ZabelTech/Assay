@@ -9,6 +9,7 @@ import { AdminTokensRepo } from "./storage/admin_tokens.repo.js";
 import { ClaimsRepo } from "./storage/claims.repo.js";
 import { TokensRepo } from "./storage/tokens.repo.js";
 import { AuditRepo } from "./storage/audit.repo.js";
+import { HandlesRepo } from "./storage/handles.repo.js";
 import { SubjectRepo } from "./storage/subject.repo.js";
 import { buildApp } from "./mcp/transport.js";
 
@@ -43,6 +44,7 @@ const app = buildApp({
 	audit: new AuditRepo(db),
 	subjects: new SubjectRepo(db),
 	adminTokens: new AdminTokensRepo(db),
+	handles: new HandlesRepo(db),
 	evidenceStore: new LocalEvidenceStore(cfg.evidenceDir),
 	mailer,
 	synthesizer: new StubSynthesizer(),

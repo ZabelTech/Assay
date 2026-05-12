@@ -6,6 +6,7 @@ import type { Database } from "better-sqlite3";
 import type { AdminTokensRepo } from "../storage/admin_tokens.repo.js";
 import type { AuditRepo } from "../storage/audit.repo.js";
 import type { ClaimsRepo } from "../storage/claims.repo.js";
+import type { HandlesRepo } from "../storage/handles.repo.js";
 import type { SubjectRepo } from "../storage/subject.repo.js";
 import type { TokensRepo } from "../storage/tokens.repo.js";
 import type { Mailer } from "../adapters/mailer.js";
@@ -15,18 +16,21 @@ import { mountAdminAuditRoutes } from "./audit.js";
 import { mountAdminClaimRoutes } from "./claims.js";
 import { mountAdminEndorsementRoutes } from "./endorsement.js";
 import { mountAdminEvidenceRoutes } from "./evidence.js";
+import { mountAdminHandleRoutes } from "./handle.js";
 import { mountAdminSubjectRoutes } from "./subject.js";
 import { mountAdminTokenRoutes } from "./tokens.js";
 
 export interface AdminRouteDeps {
 	subject: string;
 	operatorUrl: string;
+	operatorType: "hosted" | "self_hosted" | "experimental";
 	db: Database;
 	adminTokens: AdminTokensRepo;
 	subjects: SubjectRepo;
 	claims: ClaimsRepo;
 	tokens: TokensRepo;
 	audit: AuditRepo;
+	handles: HandlesRepo;
 	mailer: Mailer;
 	evidenceStore: EvidenceStore;
 }
@@ -84,5 +88,12 @@ export function mountAdminRoutes(app: Hono, deps: AdminRouteDeps): void {
 	mountAdminAuditRoutes(app, {
 		adminTokens: deps.adminTokens,
 		audit: deps.audit,
+	});
+
+	mountAdminHandleRoutes(app, {
+		adminTokens: deps.adminTokens,
+		handles: deps.handles,
+		tokens: deps.tokens,
+		operatorType: deps.operatorType,
 	});
 }

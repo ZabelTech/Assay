@@ -304,3 +304,20 @@ export function parseCareer(input: unknown): Career {
 	const claims = parsed.claims.map(parseClaim);
 	return { ...parsed, claims } as Career;
 }
+
+// #7 handle validator (hosted deployments). RFC 1035 DNS label rules:
+// - 1..63 chars
+// - LDH set: ASCII letters, digits, hyphen
+// - No leading or trailing hyphen
+// Letters are lowercase by convention; we lowercase before validating so users can paste
+// mixed-case input.
+const DNS_LABEL = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
+
+export function parseDnsLabel(input: unknown): string {
+	if (typeof input !== "string") throw new Error("handle must be a string");
+	const lower = input.toLowerCase();
+	if (!DNS_LABEL.test(lower)) {
+		throw new Error("handle must match RFC 1035 DNS label rules (a-z, 0-9, -; 1..63 chars; no leading/trailing hyphen)");
+	}
+	return lower;
+}

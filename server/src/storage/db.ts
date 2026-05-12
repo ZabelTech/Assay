@@ -78,6 +78,12 @@ CREATE TABLE IF NOT EXISTS current_subject (
 	id INTEGER PRIMARY KEY CHECK (id = 1),
 	email TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS handles (
+	id INTEGER PRIMARY KEY CHECK (id = 1),
+	handle TEXT NOT NULL,
+	set_at TEXT NOT NULL
+);
 `;
 
 export function openDatabase(path: string): DB {

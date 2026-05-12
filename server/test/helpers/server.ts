@@ -14,6 +14,7 @@ import { AdminTokensRepo } from "../../src/storage/admin_tokens.repo.js";
 import { ClaimsRepo } from "../../src/storage/claims.repo.js";
 import { TokensRepo } from "../../src/storage/tokens.repo.js";
 import { AuditRepo } from "../../src/storage/audit.repo.js";
+import { HandlesRepo } from "../../src/storage/handles.repo.js";
 import { SubjectRepo } from "../../src/storage/subject.repo.js";
 
 export type TokenForm = "header" | "query" | "path";
@@ -23,6 +24,7 @@ export interface BuildTestServerOpts {
 	subjectVerified?: boolean; // default true
 	claims?: Claim[];
 	operatorUrl?: string;
+	operatorType?: "hosted" | "self_hosted" | "experimental";
 	rateLimit?: { window_ms: number; max: number };
 }
 
@@ -67,6 +69,7 @@ export async function buildTestServer(opts: BuildTestServerOpts = {}): Promise<T
 	const audit = new AuditRepo(db);
 	const subjects = new SubjectRepo(db);
 	const adminTokens = new AdminTokensRepo(db);
+	const handles = new HandlesRepo(db);
 	const evidenceStore = new MemoryEvidenceStore();
 	const mailer = new CaptureMailer();
 	const synthesizer = new StubSynthesizer();
@@ -88,12 +91,14 @@ export async function buildTestServer(opts: BuildTestServerOpts = {}): Promise<T
 	const app = buildApp({
 		subject,
 		operatorUrl,
+		operatorType: opts.operatorType,
 		db,
 		claims,
 		tokens,
 		audit,
 		subjects,
 		adminTokens,
+		handles,
 		evidenceStore,
 		mailer,
 		synthesizer,

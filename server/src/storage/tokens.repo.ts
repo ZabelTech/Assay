@@ -37,6 +37,13 @@ export class TokensRepo {
 		this.db.prepare(`UPDATE tokens SET revoked = 1 WHERE token_id = ?`).run(token_id);
 	}
 
+	revokeAll(): number {
+		// #7 handle change: every outstanding tokenized URL embeds the old handle and would
+		// otherwise break in recipients' hands. The candidate must re-issue under the new.
+		const info = this.db.prepare(`UPDATE tokens SET revoked = 1 WHERE revoked = 0`).run();
+		return info.changes;
+	}
+
 	// #7 admin list: returns all rows (active + revoked) so the candidate has audit context
 	// over previously-issued tokens, not only currently-valid ones.
 	list(): TokenRecord[] {
