@@ -71,6 +71,10 @@ export async function buildTestServer(opts: BuildTestServerOpts = {}): Promise<T
 
 	const { token: adminToken } = adminTokens.issue();
 
+	// Seed the subject row + current_subject pointer so the dynamic-subject MCP gate works
+	// from the start. seedSubject is idempotent and does not flip verification state.
+	subjects.seedSubject(subject);
+
 	if (opts.subjectVerified ?? true) {
 		subjects.markVerified(subject, { challenge_method: "click_through_link" });
 	}
@@ -82,6 +86,7 @@ export async function buildTestServer(opts: BuildTestServerOpts = {}): Promise<T
 	const app = buildApp({
 		subject,
 		operatorUrl,
+		db,
 		claims,
 		tokens,
 		audit,
@@ -159,10 +164,10 @@ export async function buildTestServer(opts: BuildTestServerOpts = {}): Promise<T
 			});
 			return { status: res.status, body: parsed, headers: outHeaders };
 		},
-		rawFetch(path, init) {
+		async rawFetch(path, init) {
 			return app.fetch(new Request(`http://localhost${path}`, init));
 		},
-		adminFetch(path, init = {}) {
+		async adminFetch(path, init = {}) {
 			const { noAuth, headers, ...rest } = init as RequestInit & { noAuth?: boolean };
 			const merged = new Headers(headers);
 			if (!noAuth && !merged.has("authorization")) {

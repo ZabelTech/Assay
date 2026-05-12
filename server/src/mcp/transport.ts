@@ -4,6 +4,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { randomBytes } from "node:crypto";
+import type { Database } from "better-sqlite3";
 import type { AdminTokensRepo } from "../storage/admin_tokens.repo.js";
 import type { AuditRepo } from "../storage/audit.repo.js";
 import type { ClaimsRepo } from "../storage/claims.repo.js";
@@ -20,7 +21,6 @@ import { handleGetClaim } from "../tools/get_claim.js";
 import { readIdentityResource } from "../resources/identity.js";
 import { readSchemaResource } from "../resources/schema.js";
 import { readServerInfoResource } from "../resources/server_info.js";
-import { handleSubjectVerifyStart, handleSubjectVerifyComplete } from "../verification/subject.js";
 import { handleEndorsementStart, handleEndorsementComplete } from "../verification/endorser.js";
 
 const MAX_REQUEST_BYTES = 5 * 1024 * 1024; // §12 — career objects under 5MB.
@@ -81,6 +81,7 @@ export interface BuildAppDeps {
 	subject: string;
 	operatorUrl: string;
 	operatorType?: "hosted" | "self_hosted" | "experimental";
+	db: Database;
 	claims: ClaimsRepo;
 	tokens: TokensRepo;
 	audit: AuditRepo;
@@ -136,30 +137,17 @@ export function buildApp(depsIn: BuildAppDeps) {
 
 	app.get("/healthz", (c) => c.text("ok"));
 
-	// Admin API routes that require admin-bearer auth (#7). Includes /whoami today; future
-	// phases mount claims/evidence/tokens/etc. here. Verification routes below are intentionally
-	// outside this — see comment in admin/routes.ts.
+	// Admin API routes (#7). /admin/api/whoami, /admin/api/subject/* — all gated by the
+	// admin bearer except completion endpoints (the email challenge is the credential).
+	// Phase 5 will migrate /admin/api/endorsement/* into the same module.
 	mountAdminRoutes(app, {
 		subject: deps.subject,
+		operatorUrl: deps.operatorUrl,
+		db: deps.db,
 		adminTokens: deps.adminTokens,
 		subjects: deps.subjects,
-	});
-
-	// Admin API (verification flows + token issuance). Not MCP. Mounted under /admin/api.
-	app.post("/admin/api/subject/verify/start", async (c) => {
-		const body = (await c.req.json().catch(() => ({}))) as { email?: string; method?: string };
-		const result = await handleSubjectVerifyStart(deps, body);
-		return c.json(result, 202);
-	});
-	app.get("/admin/api/subject/verify/complete", async (c) => {
-		const challenge = c.req.query("challenge");
-		const ok = handleSubjectVerifyComplete(deps, { challenge });
-		return c.json({ ok }, ok ? 200 : 400);
-	});
-	app.post("/admin/api/subject/verify/complete", async (c) => {
-		const body = (await c.req.json().catch(() => ({}))) as { email?: string; code?: string };
-		const ok = handleSubjectVerifyComplete(deps, body);
-		return c.json({ ok }, ok ? 200 : 400);
+		claims: deps.claims,
+		mailer: deps.mailer,
 	});
 
 	app.post("/admin/api/endorsement/start", async (c) => {
@@ -284,9 +272,13 @@ async function dispatch(deps: BuildAppDeps, payload: any, auth: AuthState): Prom
 	if (method === "resources/list") {
 		return { resources: RESOURCES };
 	}
+	// #7 change-email: the current subject may differ from the config-time `deps.subject`
+	// (initial bootstrap value) after a change-email cascade. Honour the dynamic pointer.
+	const currentSubject = deps.subjects.getCurrentSubject() ?? deps.subject;
+
 	if (method === "tools/call") {
 		// Subject verification gate (§4.1).
-		if (!deps.subjects.isVerified(deps.subject)) {
+		if (!deps.subjects.isVerified(currentSubject)) {
 			throw new CairnError("subject_unverified", "subject email not yet verified");
 		}
 		const { name, arguments: args } = payload.params ?? {};
@@ -303,10 +295,10 @@ async function dispatch(deps: BuildAppDeps, payload: any, auth: AuthState): Prom
 			return readSchemaResource();
 		}
 		if (uri === "cairn://identity") {
-			if (!deps.subjects.isVerified(deps.subject)) {
+			if (!deps.subjects.isVerified(currentSubject)) {
 				throw new CairnError("subject_unverified", "subject email not yet verified");
 			}
-			return readIdentityResource(deps);
+			return readIdentityResource({ ...deps, subject: currentSubject });
 		}
 		throw new CairnError("malformed_input", `unknown resource uri: ${uri}`);
 	}

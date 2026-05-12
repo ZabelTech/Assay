@@ -36,6 +36,7 @@ const app = buildApp({
 	subject: cfg.subject,
 	operatorUrl: cfg.operatorUrl,
 	operatorType: cfg.operatorType,
+	db,
 	claims: new ClaimsRepo(db),
 	tokens: new TokensRepo(db),
 	audit: new AuditRepo(db),

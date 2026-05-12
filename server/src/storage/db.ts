@@ -69,6 +69,11 @@ CREATE TABLE IF NOT EXISTS admin_tokens (
 	created_at TEXT NOT NULL,
 	revoked INTEGER NOT NULL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS current_subject (
+	id INTEGER PRIMARY KEY CHECK (id = 1),
+	email TEXT NOT NULL
+);
 `;
 
 export function openDatabase(path: string): DB {

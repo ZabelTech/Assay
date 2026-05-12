@@ -8,6 +8,7 @@ export class SubjectRepo {
 	seedSubject(email: string): void {
 		// #7 admin bootstrap: the initial subject is set by an admin out-of-band.
 		// Idempotent — does not touch verification state on existing rows.
+		// Sets `current_subject` to this email IFF no current subject is set yet.
 		this.db
 			.prepare(
 				`INSERT INTO subjects (email, verified, verified_at, challenge_method)
@@ -15,6 +16,40 @@ export class SubjectRepo {
 				 ON CONFLICT(email) DO NOTHING`,
 			)
 			.run(email);
+		this.db
+			.prepare(`INSERT INTO current_subject (id, email) VALUES (1, ?) ON CONFLICT(id) DO NOTHING`)
+			.run(email);
+	}
+
+	getCurrentSubject(): string | null {
+		const row = this.db.prepare(`SELECT email FROM current_subject WHERE id = 1`).get() as
+			| { email: string }
+			| undefined;
+		return row?.email ?? null;
+	}
+
+	setCurrentSubject(email: string): void {
+		// #7 change-email: atomic pointer update. The caller is responsible for the rest of
+		// the cascade (claim rewrites, email_attested removal, pending solicitation removal).
+		this.db
+			.prepare(
+				`INSERT INTO current_subject (id, email) VALUES (1, ?)
+				 ON CONFLICT(id) DO UPDATE SET email = excluded.email`,
+			)
+			.run(email);
+	}
+
+	countPendingEndorsementChallenges(): number {
+		const row = this.db
+			.prepare(`SELECT COUNT(*) AS n FROM endorsement_challenges WHERE consumed = 0`)
+			.get() as { n: number };
+		return row.n;
+	}
+
+	deleteAllPendingEndorsementChallenges(): void {
+		// #7 change-email cascade: pending solicitations were initiated under the old subject
+		// context and are no longer meaningful.
+		this.db.prepare(`DELETE FROM endorsement_challenges WHERE consumed = 0`).run();
 	}
 
 	isVerified(email: string): boolean {
