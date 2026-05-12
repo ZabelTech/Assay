@@ -149,6 +149,7 @@ export function buildApp(depsIn: BuildAppDeps) {
 		subjects: deps.subjects,
 		claims: deps.claims,
 		tokens: deps.tokens,
+		audit: deps.audit,
 		mailer: deps.mailer,
 		evidenceStore: deps.evidenceStore,
 	});
