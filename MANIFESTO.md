@@ -68,6 +68,26 @@ No more hunting for the latest version of your CV. No more *“let me send you t
 
 -----
 
+The good advice was always *“tailor your CV to the role.”*
+
+Almost nobody did it. Tailoring is hours of work per application. So candidates sent the same generic two pages and hoped.
+
+When the career is composable facts, tailoring is free.
+
+The recruiter’s agent asks what the role demands. The endpoint answers with the slice that fits. Different role, different slice — same source of truth underneath. The “tailored CV” becomes a query response.
+
+-----
+
+For the recruiter, the same property runs the other direction.
+
+One role. A pool of candidates who have shared their endpoints. Today: read fifty CVs, guess at fifty fits.
+
+Now: one query, fanned across fifty endpoints. The agent ranks. Cites which claims came from where. The recruiter reads the slice that matters per candidate, not the whole document.
+
+A person-week of reading becomes an afternoon of querying.
+
+-----
+
 The hard part is not the protocol.
 
 The hard part is trust.
