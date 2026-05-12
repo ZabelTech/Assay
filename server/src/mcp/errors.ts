@@ -10,6 +10,7 @@ export const ERROR_CODES = {
 	subject_unverified: -32007,
 	malformed_input: -32008,
 	rate_limited: -32009,
+	unauthorized_admin: -32010,
 } as const;
 
 export type ErrorSymbol = keyof typeof ERROR_CODES;

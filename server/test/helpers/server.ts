@@ -9,6 +9,7 @@ import { buildApp } from "../../src/mcp/transport.js";
 import { CaptureMailer } from "../../src/adapters/mailer.js";
 import { StubSynthesizer } from "../../src/adapters/synthesizer.js";
 import { openDatabase } from "../../src/storage/db.js";
+import { AdminTokensRepo } from "../../src/storage/admin_tokens.repo.js";
 import { ClaimsRepo } from "../../src/storage/claims.repo.js";
 import { TokensRepo } from "../../src/storage/tokens.repo.js";
 import { AuditRepo } from "../../src/storage/audit.repo.js";
@@ -32,6 +33,8 @@ export interface TestServer {
 	tokens: TokensRepo;
 	audit: AuditRepo;
 	subjects: SubjectRepo;
+	adminTokens: AdminTokensRepo;
+	adminToken: string;
 	issueToken(opts?: {
 		expires_at?: string;
 		audience_hint?: string;
@@ -48,6 +51,7 @@ export interface TestServer {
 		extraQuery?: Record<string, string>;
 	}): Promise<{ status: number; body: any; headers: Record<string, string> }>;
 	rawFetch(path: string, init?: RequestInit): Promise<Response>;
+	adminFetch(path: string, init?: RequestInit & { noAuth?: boolean }): Promise<Response>;
 	outbox(): CapturedEmail[];
 	close(): void;
 }
@@ -61,8 +65,11 @@ export async function buildTestServer(opts: BuildTestServerOpts = {}): Promise<T
 	const tokens = new TokensRepo(db);
 	const audit = new AuditRepo(db);
 	const subjects = new SubjectRepo(db);
+	const adminTokens = new AdminTokensRepo(db);
 	const mailer = new CaptureMailer();
 	const synthesizer = new StubSynthesizer();
+
+	const { token: adminToken } = adminTokens.issue();
 
 	if (opts.subjectVerified ?? true) {
 		subjects.markVerified(subject, { challenge_method: "click_through_link" });
@@ -79,6 +86,7 @@ export async function buildTestServer(opts: BuildTestServerOpts = {}): Promise<T
 		tokens,
 		audit,
 		subjects,
+		adminTokens,
 		mailer,
 		synthesizer,
 		rateLimit: opts.rateLimit ?? { window_ms: 60_000, max: 60 },
@@ -105,6 +113,8 @@ export async function buildTestServer(opts: BuildTestServerOpts = {}): Promise<T
 		tokens,
 		audit,
 		subjects,
+		adminTokens,
+		adminToken,
 		issueToken(o = {}) {
 			return tokens.issue({
 				expires_at: o.expires_at ?? new Date(Date.now() + 86400000).toISOString(),
@@ -151,6 +161,14 @@ export async function buildTestServer(opts: BuildTestServerOpts = {}): Promise<T
 		},
 		rawFetch(path, init) {
 			return app.fetch(new Request(`http://localhost${path}`, init));
+		},
+		adminFetch(path, init = {}) {
+			const { noAuth, headers, ...rest } = init as RequestInit & { noAuth?: boolean };
+			const merged = new Headers(headers);
+			if (!noAuth && !merged.has("authorization")) {
+				merged.set("authorization", `Bearer ${adminToken}`);
+			}
+			return app.fetch(new Request(`http://localhost${path}`, { ...rest, headers: merged }));
 		},
 		outbox() {
 			return mailer.outbox();

@@ -5,6 +5,18 @@ import type { Database } from "better-sqlite3";
 export class SubjectRepo {
 	constructor(private db: Database) {}
 
+	seedSubject(email: string): void {
+		// #7 admin bootstrap: the initial subject is set by an admin out-of-band.
+		// Idempotent — does not touch verification state on existing rows.
+		this.db
+			.prepare(
+				`INSERT INTO subjects (email, verified, verified_at, challenge_method)
+				 VALUES (?, 0, NULL, NULL)
+				 ON CONFLICT(email) DO NOTHING`,
+			)
+			.run(email);
+	}
+
 	isVerified(email: string): boolean {
 		const row = this.db.prepare(`SELECT verified FROM subjects WHERE email = ?`).get(email) as
 			| { verified: number }

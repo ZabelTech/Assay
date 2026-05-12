@@ -4,12 +4,14 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { randomBytes } from "node:crypto";
+import type { AdminTokensRepo } from "../storage/admin_tokens.repo.js";
 import type { AuditRepo } from "../storage/audit.repo.js";
 import type { ClaimsRepo } from "../storage/claims.repo.js";
 import type { SubjectRepo } from "../storage/subject.repo.js";
 import type { TokensRepo } from "../storage/tokens.repo.js";
 import type { Mailer } from "../adapters/mailer.js";
 import type { Synthesizer } from "../adapters/synthesizer.js";
+import { mountAdminRoutes } from "../admin/routes.js";
 import { extractToken } from "./auth.js";
 import { CairnError } from "./errors.js";
 import { handleQueryCareer } from "../tools/query_career.js";
@@ -83,6 +85,7 @@ export interface BuildAppDeps {
 	tokens: TokensRepo;
 	audit: AuditRepo;
 	subjects: SubjectRepo;
+	adminTokens: AdminTokensRepo;
 	mailer: Mailer;
 	synthesizer: Synthesizer;
 	rateLimit: { window_ms: number; max: number };
@@ -132,6 +135,15 @@ export function buildApp(depsIn: BuildAppDeps) {
 	);
 
 	app.get("/healthz", (c) => c.text("ok"));
+
+	// Admin API routes that require admin-bearer auth (#7). Includes /whoami today; future
+	// phases mount claims/evidence/tokens/etc. here. Verification routes below are intentionally
+	// outside this — see comment in admin/routes.ts.
+	mountAdminRoutes(app, {
+		subject: deps.subject,
+		adminTokens: deps.adminTokens,
+		subjects: deps.subjects,
+	});
 
 	// Admin API (verification flows + token issuance). Not MCP. Mounted under /admin/api.
 	app.post("/admin/api/subject/verify/start", async (c) => {

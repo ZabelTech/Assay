@@ -4,6 +4,7 @@ import { loadConfig } from "./config.js";
 import { CaptureMailer, SmtpMailer } from "./adapters/mailer.js";
 import { StubSynthesizer } from "./adapters/synthesizer.js";
 import { openDatabase } from "./storage/db.js";
+import { AdminTokensRepo } from "./storage/admin_tokens.repo.js";
 import { ClaimsRepo } from "./storage/claims.repo.js";
 import { TokensRepo } from "./storage/tokens.repo.js";
 import { AuditRepo } from "./storage/audit.repo.js";
@@ -39,6 +40,7 @@ const app = buildApp({
 	tokens: new TokensRepo(db),
 	audit: new AuditRepo(db),
 	subjects: new SubjectRepo(db),
+	adminTokens: new AdminTokensRepo(db),
 	mailer,
 	synthesizer: new StubSynthesizer(),
 	rateLimit: cfg.rateLimit,
