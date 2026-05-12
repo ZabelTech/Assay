@@ -3,7 +3,11 @@ import { serve } from "@hono/node-server";
 import { loadConfig } from "./config.js";
 import { CaptureMailer, SmtpMailer } from "./adapters/mailer.js";
 import { LocalEvidenceStore } from "./adapters/evidence_store.js";
+import { MockOAuthProvider } from "./adapters/oauth.js";
+import { MockPdfParser } from "./adapters/pdf_parser.js";
+import { MockStructurer } from "./adapters/structurer.js";
 import { StubSynthesizer } from "./adapters/synthesizer.js";
+import { ClaimDraftsRepo } from "./storage/claim_drafts.repo.js";
 import { openDatabase } from "./storage/db.js";
 import { AdminTokensRepo } from "./storage/admin_tokens.repo.js";
 import { ClaimsRepo } from "./storage/claims.repo.js";
@@ -45,7 +49,14 @@ const app = buildApp({
 	subjects: new SubjectRepo(db),
 	adminTokens: new AdminTokensRepo(db),
 	handles: new HandlesRepo(db),
+	drafts: new ClaimDraftsRepo(db),
 	evidenceStore: new LocalEvidenceStore(cfg.evidenceDir),
+	structurer: new MockStructurer(),
+	pdfParser: new MockPdfParser(),
+	oauthProviders: new Map([
+		["linkedin", new MockOAuthProvider("linkedin")],
+		["github", new MockOAuthProvider("github")],
+	]),
 	mailer,
 	synthesizer: new StubSynthesizer(),
 	rateLimit: cfg.rateLimit,

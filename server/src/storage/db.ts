@@ -84,6 +84,16 @@ CREATE TABLE IF NOT EXISTS handles (
 	handle TEXT NOT NULL,
 	set_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS claim_drafts (
+	draft_id TEXT PRIMARY KEY,
+	source TEXT NOT NULL,
+	type TEXT NOT NULL,
+	visibility TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL,
+	body TEXT NOT NULL
+);
 `;
 
 export function openDatabase(path: string): DB {

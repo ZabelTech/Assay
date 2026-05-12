@@ -9,6 +9,10 @@ import { buildApp } from "../../src/mcp/transport.js";
 import { CaptureMailer } from "../../src/adapters/mailer.js";
 import { StubSynthesizer } from "../../src/adapters/synthesizer.js";
 import { MemoryEvidenceStore } from "../../src/adapters/evidence_store.js";
+import { MockOAuthProvider, type OAuthProvider } from "../../src/adapters/oauth.js";
+import { MockPdfParser } from "../../src/adapters/pdf_parser.js";
+import { MockStructurer } from "../../src/adapters/structurer.js";
+import { ClaimDraftsRepo } from "../../src/storage/claim_drafts.repo.js";
 import { openDatabase } from "../../src/storage/db.js";
 import { AdminTokensRepo } from "../../src/storage/admin_tokens.repo.js";
 import { ClaimsRepo } from "../../src/storage/claims.repo.js";
@@ -37,6 +41,10 @@ export interface TestServer {
 	audit: AuditRepo;
 	subjects: SubjectRepo;
 	adminTokens: AdminTokensRepo;
+	drafts: ClaimDraftsRepo;
+	structurer: MockStructurer;
+	oauthProviders: Map<string, OAuthProvider>;
+	pdfParser: MockPdfParser;
 	adminToken: string;
 	issueToken(opts?: {
 		expires_at?: string;
@@ -70,7 +78,14 @@ export async function buildTestServer(opts: BuildTestServerOpts = {}): Promise<T
 	const subjects = new SubjectRepo(db);
 	const adminTokens = new AdminTokensRepo(db);
 	const handles = new HandlesRepo(db);
+	const drafts = new ClaimDraftsRepo(db);
 	const evidenceStore = new MemoryEvidenceStore();
+	const structurer = new MockStructurer();
+	const pdfParser = new MockPdfParser();
+	const oauthProviders = new Map<string, OAuthProvider>([
+		["linkedin", new MockOAuthProvider("linkedin")],
+		["github", new MockOAuthProvider("github")],
+	]);
 	const mailer = new CaptureMailer();
 	const synthesizer = new StubSynthesizer();
 
@@ -99,9 +114,13 @@ export async function buildTestServer(opts: BuildTestServerOpts = {}): Promise<T
 		subjects,
 		adminTokens,
 		handles,
+		drafts,
 		evidenceStore,
 		mailer,
 		synthesizer,
+		structurer,
+		oauthProviders,
+		pdfParser,
 		rateLimit: opts.rateLimit ?? { window_ms: 60_000, max: 60 },
 		corsOrigins: ["*"],
 	});
@@ -127,6 +146,10 @@ export async function buildTestServer(opts: BuildTestServerOpts = {}): Promise<T
 		audit,
 		subjects,
 		adminTokens,
+		drafts,
+		structurer,
+		oauthProviders,
+		pdfParser,
 		adminToken,
 		issueToken(o = {}) {
 			return tokens.issue({

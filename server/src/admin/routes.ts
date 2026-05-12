@@ -6,17 +6,22 @@ import type { Database } from "better-sqlite3";
 import type { AdminTokensRepo } from "../storage/admin_tokens.repo.js";
 import type { AuditRepo } from "../storage/audit.repo.js";
 import type { ClaimsRepo } from "../storage/claims.repo.js";
+import type { ClaimDraftsRepo } from "../storage/claim_drafts.repo.js";
 import type { HandlesRepo } from "../storage/handles.repo.js";
 import type { SubjectRepo } from "../storage/subject.repo.js";
 import type { TokensRepo } from "../storage/tokens.repo.js";
 import type { Mailer } from "../adapters/mailer.js";
 import type { EvidenceStore } from "../adapters/evidence_store.js";
+import type { OAuthProvider } from "../adapters/oauth.js";
+import type { PdfParser } from "../adapters/pdf_parser.js";
+import type { Structurer } from "../adapters/structurer.js";
 import { requireAdmin } from "./auth.js";
 import { mountAdminAuditRoutes } from "./audit.js";
 import { mountAdminClaimRoutes } from "./claims.js";
 import { mountAdminEndorsementRoutes } from "./endorsement.js";
 import { mountAdminEvidenceRoutes } from "./evidence.js";
 import { mountAdminHandleRoutes } from "./handle.js";
+import { mountAdminImportsRoutes } from "./imports.js";
 import { mountAdminSubjectRoutes } from "./subject.js";
 import { mountAdminTokenRoutes } from "./tokens.js";
 
@@ -31,8 +36,12 @@ export interface AdminRouteDeps {
 	tokens: TokensRepo;
 	audit: AuditRepo;
 	handles: HandlesRepo;
+	drafts: ClaimDraftsRepo;
 	mailer: Mailer;
 	evidenceStore: EvidenceStore;
+	structurer: Structurer;
+	oauthProviders: Map<string, OAuthProvider>;
+	pdfParser: PdfParser;
 }
 
 export function mountAdminRoutes(app: Hono, deps: AdminRouteDeps): void {
@@ -95,5 +104,16 @@ export function mountAdminRoutes(app: Hono, deps: AdminRouteDeps): void {
 		handles: deps.handles,
 		tokens: deps.tokens,
 		operatorType: deps.operatorType,
+	});
+
+	mountAdminImportsRoutes(app, {
+		adminTokens: deps.adminTokens,
+		subjects: deps.subjects,
+		claims: deps.claims,
+		drafts: deps.drafts,
+		structurer: deps.structurer,
+		oauthProviders: deps.oauthProviders,
+		pdfParser: deps.pdfParser,
+		defaultSubject: deps.subject,
 	});
 }

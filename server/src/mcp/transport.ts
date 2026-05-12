@@ -8,9 +8,13 @@ import type { Database } from "better-sqlite3";
 import type { AdminTokensRepo } from "../storage/admin_tokens.repo.js";
 import type { AuditRepo } from "../storage/audit.repo.js";
 import type { ClaimsRepo } from "../storage/claims.repo.js";
+import type { ClaimDraftsRepo } from "../storage/claim_drafts.repo.js";
 import type { HandlesRepo } from "../storage/handles.repo.js";
 import type { SubjectRepo } from "../storage/subject.repo.js";
 import type { TokensRepo } from "../storage/tokens.repo.js";
+import type { OAuthProvider } from "../adapters/oauth.js";
+import type { PdfParser } from "../adapters/pdf_parser.js";
+import type { Structurer } from "../adapters/structurer.js";
 import type { EvidenceStore } from "../adapters/evidence_store.js";
 import type { Mailer } from "../adapters/mailer.js";
 import type { Synthesizer } from "../adapters/synthesizer.js";
@@ -89,9 +93,13 @@ export interface BuildAppDeps {
 	subjects: SubjectRepo;
 	adminTokens: AdminTokensRepo;
 	handles: HandlesRepo;
+	drafts: ClaimDraftsRepo;
 	evidenceStore: EvidenceStore;
 	mailer: Mailer;
 	synthesizer: Synthesizer;
+	structurer: Structurer;
+	oauthProviders: Map<string, OAuthProvider>;
+	pdfParser: PdfParser;
 	rateLimit: { window_ms: number; max: number };
 	corsOrigins: string[];
 }
@@ -154,8 +162,12 @@ export function buildApp(depsIn: BuildAppDeps) {
 		tokens: deps.tokens,
 		audit: deps.audit,
 		handles: deps.handles,
+		drafts: deps.drafts,
 		mailer: deps.mailer,
 		evidenceStore: deps.evidenceStore,
+		structurer: deps.structurer,
+		oauthProviders: deps.oauthProviders,
+		pdfParser: deps.pdfParser,
 	});
 
 	// MCP transport: POST to /mcp, /mcp?t=, or /mcp/t/<token>
