@@ -37,6 +37,32 @@ export class TokensRepo {
 		this.db.prepare(`UPDATE tokens SET revoked = 1 WHERE token_id = ?`).run(token_id);
 	}
 
+	// #7 admin list: returns all rows (active + revoked) so the candidate has audit context
+	// over previously-issued tokens, not only currently-valid ones.
+	list(): TokenRecord[] {
+		const rows = this.db
+			.prepare(
+				`SELECT token_id, expires_at, audience_hint, purpose, revoked, created_at
+				 FROM tokens ORDER BY created_at, token_id`,
+			)
+			.all() as Array<{
+			token_id: string;
+			expires_at: string;
+			audience_hint: string | null;
+			purpose: string | null;
+			revoked: number;
+			created_at: string;
+		}>;
+		return rows.map((r) => ({
+			token_id: r.token_id,
+			expires_at: r.expires_at,
+			audience_hint: r.audience_hint ?? undefined,
+			purpose: r.purpose ?? undefined,
+			revoked: r.revoked === 1,
+			created_at: r.created_at,
+		}));
+	}
+
 	check(token: string): TokenStatus {
 		const row = this.db
 			.prepare(

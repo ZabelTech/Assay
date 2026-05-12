@@ -6,6 +6,7 @@ import type { Database } from "better-sqlite3";
 import type { AdminTokensRepo } from "../storage/admin_tokens.repo.js";
 import type { ClaimsRepo } from "../storage/claims.repo.js";
 import type { SubjectRepo } from "../storage/subject.repo.js";
+import type { TokensRepo } from "../storage/tokens.repo.js";
 import type { Mailer } from "../adapters/mailer.js";
 import type { EvidenceStore } from "../adapters/evidence_store.js";
 import { requireAdmin } from "./auth.js";
@@ -13,6 +14,7 @@ import { mountAdminClaimRoutes } from "./claims.js";
 import { mountAdminEndorsementRoutes } from "./endorsement.js";
 import { mountAdminEvidenceRoutes } from "./evidence.js";
 import { mountAdminSubjectRoutes } from "./subject.js";
+import { mountAdminTokenRoutes } from "./tokens.js";
 
 export interface AdminRouteDeps {
 	subject: string;
@@ -21,6 +23,7 @@ export interface AdminRouteDeps {
 	adminTokens: AdminTokensRepo;
 	subjects: SubjectRepo;
 	claims: ClaimsRepo;
+	tokens: TokensRepo;
 	mailer: Mailer;
 	evidenceStore: EvidenceStore;
 }
@@ -65,6 +68,13 @@ export function mountAdminRoutes(app: Hono, deps: AdminRouteDeps): void {
 		claims: deps.claims,
 		mailer: deps.mailer,
 		operatorUrl: deps.operatorUrl,
+		defaultSubject: deps.subject,
+	});
+
+	mountAdminTokenRoutes(app, {
+		adminTokens: deps.adminTokens,
+		subjects: deps.subjects,
+		tokens: deps.tokens,
 		defaultSubject: deps.subject,
 	});
 }
