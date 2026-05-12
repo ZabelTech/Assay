@@ -2,6 +2,7 @@
 import { serve } from "@hono/node-server";
 import { loadConfig } from "./config.js";
 import { CaptureMailer, SmtpMailer } from "./adapters/mailer.js";
+import { LocalEvidenceStore } from "./adapters/evidence_store.js";
 import { StubSynthesizer } from "./adapters/synthesizer.js";
 import { openDatabase } from "./storage/db.js";
 import { AdminTokensRepo } from "./storage/admin_tokens.repo.js";
@@ -42,6 +43,7 @@ const app = buildApp({
 	audit: new AuditRepo(db),
 	subjects: new SubjectRepo(db),
 	adminTokens: new AdminTokensRepo(db),
+	evidenceStore: new LocalEvidenceStore(cfg.evidenceDir),
 	mailer,
 	synthesizer: new StubSynthesizer(),
 	rateLimit: cfg.rateLimit,

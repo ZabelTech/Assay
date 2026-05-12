@@ -17,6 +17,7 @@ export interface Config {
 	};
 	corsOrigins: string[];
 	rateLimit: { window_ms: number; max: number };
+	evidenceDir: string;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -40,5 +41,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 			window_ms: parseInt(env.RATE_LIMIT_WINDOW_MS ?? "60000", 10),
 			max: parseInt(env.RATE_LIMIT_MAX ?? "60", 10),
 		},
+		evidenceDir: env.EVIDENCE_DIR ?? "/data/evidence",
 	};
 }

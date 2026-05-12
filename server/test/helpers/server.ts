@@ -8,6 +8,7 @@ import type { CapturedEmail } from "../../src/adapters/mailer.js";
 import { buildApp } from "../../src/mcp/transport.js";
 import { CaptureMailer } from "../../src/adapters/mailer.js";
 import { StubSynthesizer } from "../../src/adapters/synthesizer.js";
+import { MemoryEvidenceStore } from "../../src/adapters/evidence_store.js";
 import { openDatabase } from "../../src/storage/db.js";
 import { AdminTokensRepo } from "../../src/storage/admin_tokens.repo.js";
 import { ClaimsRepo } from "../../src/storage/claims.repo.js";
@@ -66,6 +67,7 @@ export async function buildTestServer(opts: BuildTestServerOpts = {}): Promise<T
 	const audit = new AuditRepo(db);
 	const subjects = new SubjectRepo(db);
 	const adminTokens = new AdminTokensRepo(db);
+	const evidenceStore = new MemoryEvidenceStore();
 	const mailer = new CaptureMailer();
 	const synthesizer = new StubSynthesizer();
 
@@ -92,6 +94,7 @@ export async function buildTestServer(opts: BuildTestServerOpts = {}): Promise<T
 		audit,
 		subjects,
 		adminTokens,
+		evidenceStore,
 		mailer,
 		synthesizer,
 		rateLimit: opts.rateLimit ?? { window_ms: 60_000, max: 60 },

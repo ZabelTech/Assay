@@ -7,8 +7,10 @@ import type { AdminTokensRepo } from "../storage/admin_tokens.repo.js";
 import type { ClaimsRepo } from "../storage/claims.repo.js";
 import type { SubjectRepo } from "../storage/subject.repo.js";
 import type { Mailer } from "../adapters/mailer.js";
+import type { EvidenceStore } from "../adapters/evidence_store.js";
 import { requireAdmin } from "./auth.js";
 import { mountAdminClaimRoutes } from "./claims.js";
+import { mountAdminEvidenceRoutes } from "./evidence.js";
 import { mountAdminSubjectRoutes } from "./subject.js";
 
 export interface AdminRouteDeps {
@@ -19,6 +21,7 @@ export interface AdminRouteDeps {
 	subjects: SubjectRepo;
 	claims: ClaimsRepo;
 	mailer: Mailer;
+	evidenceStore: EvidenceStore;
 }
 
 export function mountAdminRoutes(app: Hono, deps: AdminRouteDeps): void {
@@ -47,5 +50,11 @@ export function mountAdminRoutes(app: Hono, deps: AdminRouteDeps): void {
 		subjects: deps.subjects,
 		adminTokens: deps.adminTokens,
 		defaultSubject: deps.subject,
+	});
+
+	mountAdminEvidenceRoutes(app, {
+		claims: deps.claims,
+		adminTokens: deps.adminTokens,
+		evidenceStore: deps.evidenceStore,
 	});
 }

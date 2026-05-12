@@ -10,6 +10,7 @@ import type { AuditRepo } from "../storage/audit.repo.js";
 import type { ClaimsRepo } from "../storage/claims.repo.js";
 import type { SubjectRepo } from "../storage/subject.repo.js";
 import type { TokensRepo } from "../storage/tokens.repo.js";
+import type { EvidenceStore } from "../adapters/evidence_store.js";
 import type { Mailer } from "../adapters/mailer.js";
 import type { Synthesizer } from "../adapters/synthesizer.js";
 import { mountAdminRoutes } from "../admin/routes.js";
@@ -87,6 +88,7 @@ export interface BuildAppDeps {
 	audit: AuditRepo;
 	subjects: SubjectRepo;
 	adminTokens: AdminTokensRepo;
+	evidenceStore: EvidenceStore;
 	mailer: Mailer;
 	synthesizer: Synthesizer;
 	rateLimit: { window_ms: number; max: number };
@@ -148,6 +150,7 @@ export function buildApp(depsIn: BuildAppDeps) {
 		subjects: deps.subjects,
 		claims: deps.claims,
 		mailer: deps.mailer,
+		evidenceStore: deps.evidenceStore,
 	});
 
 	app.post("/admin/api/endorsement/start", async (c) => {
