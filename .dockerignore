@@ -1,0 +1,13 @@
+node_modules
+server/dist
+server/coverage
+.git
+.github
+data
+*.db
+*.db-journal
+.env
+.env.local
+spec
+MANIFESTO.md
+CLAUDE.md

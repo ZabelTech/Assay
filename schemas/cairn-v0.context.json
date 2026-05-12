@@ -1,0 +1,19 @@
+{
+	"@context": {
+		"@version": 1.1,
+		"@protected": true,
+		"cairn": "https://cairn.dev/schemas/v0#",
+		"schema": "https://schema.org/",
+		"subject": "cairn:subject",
+		"schema_version": "cairn:schema_version",
+		"updated_at": "cairn:updated_at",
+		"claims": "cairn:claims",
+		"claim_id": "cairn:claim_id",
+		"type": "cairn:type",
+		"value": "cairn:value",
+		"evidence": "cairn:evidence",
+		"attestation": "cairn:attestation",
+		"visibility": "cairn:visibility",
+		"created_at": "cairn:created_at"
+	}
+}
