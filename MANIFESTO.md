@@ -58,6 +58,16 @@ Win-win.
 
 -----
 
+And the endpoint stays current.
+
+Every shipped project. Every promotion. Every endorsement that lands. The endpoint reflects what you have done — not a snapshot from when you last applied.
+
+You update once. Every querying agent sees the update.
+
+No more hunting for the latest version of your CV. No more *“let me send you the updated one.”* The endpoint is the updated one. Always.
+
+-----
+
 The hard part is not the protocol.
 
 The hard part is trust.
