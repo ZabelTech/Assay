@@ -111,28 +111,43 @@ v0 is intentionally small so it can ship with a minimal implementation surface a
 
 ## Quick start
 
-```bash
-# Run the reference server locally
-docker run -p 3000:3000 ghcr.io/zabeltech/assay
+The published image lands once the reference server PR is merged to `main`. Until then, build locally from the repo:
 
-# Verify your email and start adding claims through the admin UI at:
-# http://localhost:3000/admin
+```bash
+# Build the reference server image
+docker build -t cairn-server .
+
+# Run with a candidate email and a persistent data volume.
+# SUBJECT is the canonical identity (§4); OPERATOR_URL is the URL this server
+# advertises in tokenized share links and `derived_by` attribution.
+docker run -d --name cairn -p 3000:3000 \
+  -v $(pwd)/data:/data \
+  -e SUBJECT=you@example.com \
+  -e OPERATOR_URL=http://localhost:3000 \
+  cairn-server
+
+# Bootstrap: subject email verification, claim authoring, and token issuance
+# all live behind a CLI in v0 (the candidate admin UI is on the v0.1 roadmap).
+docker exec cairn npm run cli -- subject verify you@example.com
+docker exec cairn npm run cli -- claim add /path/to/some-claim.json
+docker exec cairn npm run cli -- token issue --days 90 \
+  --audience "Acme Talent" --purpose "Senior Backend Engineer role"
 ```
 
-Your endpoint is now live at `http://localhost:3000/mcp`. Point any MCP-compatible client at it.
+The last command prints a tokenized URL. Share it with a recruiter; their MCP client connects to it like any other authenticated MCP endpoint. The public URL (`http://localhost:3000/mcp` with no token) serves only `public` claims.
 
-For production self-hosting (TLS, a real domain, persistent storage), see [`docs/self-hosting.md`](docs/self-hosting.md).
+The `docker run` image will become `docker run … ghcr.io/zabeltech/assay` once the published image lands.
 
 ## Repository layout
 
 ```
 assay/
-├── spec/              # The Cairn Protocol specification
-├── server/            # Reference MCP server (TypeScript)
-├── schemas/           # JSON Schema and JSON-LD context for career data
-├── examples/          # Example endpoints, queries, and integrations
-└── docs/              # Protocol docs, self-hosting guide, contributor guide
+├── spec/              # The Cairn Protocol specification (spec/cairn-v0.md)
+├── server/            # Reference MCP server (TypeScript, Hono, SQLite)
+└── schemas/           # JSON-LD context for career data
 ```
+
+Additional surfaces — example clients (issue #9), recruiter-side query agent (issue #10), hosted onboarding (issue #7), and the hero page (issue #8) — live in follow-up tracking issues.
 
 ## Roadmap
 
