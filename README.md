@@ -147,7 +147,7 @@ assay/
 └── schemas/           # JSON-LD context for career data
 ```
 
-Additional surfaces — example clients (issue #9), recruiter-side query agent (issue #10), hosted onboarding (issue #7), and the hero page (issue #8) — live in follow-up tracking issues.
+Additional surfaces — example clients (issue #9), recruiter-side query agent (issue #10), candidate admin API (issue #7), and the hero page (issue #8) — live in follow-up tracking issues.
 
 ## Roadmap
 
