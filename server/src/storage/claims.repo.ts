@@ -27,6 +27,11 @@ export class ClaimsRepo {
 		return row ? (JSON.parse(row.body) as Claim) : undefined;
 	}
 
+	delete(claim_id: string): boolean {
+		const info = this.db.prepare(`DELETE FROM claims WHERE claim_id = ?`).run(claim_id);
+		return info.changes > 0;
+	}
+
 	rewriteSelfAttestedSubject(oldEmail: string, newEmail: string): number {
 		// #7 change-email cascade: `self_attested` claim subjects are rewritten atomically.
 		// Returns the number of claims rewritten.

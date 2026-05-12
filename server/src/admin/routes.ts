@@ -8,6 +8,7 @@ import type { ClaimsRepo } from "../storage/claims.repo.js";
 import type { SubjectRepo } from "../storage/subject.repo.js";
 import type { Mailer } from "../adapters/mailer.js";
 import { requireAdmin } from "./auth.js";
+import { mountAdminClaimRoutes } from "./claims.js";
 import { mountAdminSubjectRoutes } from "./subject.js";
 
 export interface AdminRouteDeps {
@@ -38,6 +39,13 @@ export function mountAdminRoutes(app: Hono, deps: AdminRouteDeps): void {
 		adminTokens: deps.adminTokens,
 		mailer: deps.mailer,
 		operatorUrl: deps.operatorUrl,
+		defaultSubject: deps.subject,
+	});
+
+	mountAdminClaimRoutes(app, {
+		claims: deps.claims,
+		subjects: deps.subjects,
+		adminTokens: deps.adminTokens,
 		defaultSubject: deps.subject,
 	});
 }
