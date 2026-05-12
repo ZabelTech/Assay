@@ -1,0 +1,39 @@
+{
+  "name": "@zabeltech/assay",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Cairn Protocol v0 reference MCP server",
+  "type": "module",
+  "license": "WTFPL",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "test": "vitest run --root server",
+    "test:watch": "vitest --root server",
+    "build": "tsc -p server/tsconfig.json",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "dev": "tsx watch server/src/index.ts",
+    "start": "node server/dist/index.js",
+    "cli": "tsx server/src/cli/index.ts",
+    "check:skips": "if grep -rE 'it\\.skip|describe\\.skip|test\\.skip' server/test; then echo 'Skipped tests found — see rule 11'; exit 1; else echo 'No skipped tests.'; fi"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "better-sqlite3": "^11.5.0",
+    "hono": "^4.6.10",
+    "@hono/node-server": "^1.13.7",
+    "nodemailer": "^6.9.16",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/node": "^22.9.0",
+    "@types/nodemailer": "^6.4.16",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.5"
+  }
+}
