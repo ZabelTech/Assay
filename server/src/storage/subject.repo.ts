@@ -107,15 +107,98 @@ export class SubjectRepo {
 		endorser_email: string;
 		endorser_name?: string;
 		value: unknown;
-	}): { challenge: string } {
+		// #7 Phase 5: optional caller-provided solicitation_id. When omitted (legacy callers),
+		// a fresh id is generated so list-by-id is always possible.
+		solicitation_id?: string;
+	}): { challenge: string; solicitation_id: string } {
 		const challenge = randomBytes(16).toString("base64url");
+		const solicitation_id = opts.solicitation_id ?? `sol_${randomBytes(8).toString("hex")}`;
+		const now = new Date().toISOString();
 		this.db
 			.prepare(
-				`INSERT INTO endorsement_challenges (challenge, endorser_email, endorser_name, value_json, created_at, consumed)
-				 VALUES (?, ?, ?, ?, ?, 0)`,
+				`INSERT INTO endorsement_challenges (challenge, endorser_email, endorser_name, value_json, created_at, consumed, solicitation_id, solicited_at)
+				 VALUES (?, ?, ?, ?, ?, 0, ?, ?)`,
 			)
-			.run(challenge, opts.endorser_email, opts.endorser_name ?? null, JSON.stringify(opts.value), new Date().toISOString());
-		return { challenge };
+			.run(
+				challenge,
+				opts.endorser_email,
+				opts.endorser_name ?? null,
+				JSON.stringify(opts.value),
+				now,
+				solicitation_id,
+				now,
+			);
+		return { challenge, solicitation_id };
+	}
+
+	listEndorsementSolicitations(): Array<{
+		solicitation_id: string;
+		challenge: string;
+		endorser_email: string;
+		endorser_name: string | null;
+		state: "pending" | "completed";
+		solicited_at: string;
+	}> {
+		const rows = this.db
+			.prepare(
+				`SELECT solicitation_id, challenge, endorser_email, endorser_name, consumed, solicited_at, created_at
+				 FROM endorsement_challenges
+				 WHERE solicitation_id IS NOT NULL
+				 ORDER BY rowid`,
+			)
+			.all() as Array<{
+			solicitation_id: string;
+			challenge: string;
+			endorser_email: string;
+			endorser_name: string | null;
+			consumed: number;
+			solicited_at: string | null;
+			created_at: string;
+		}>;
+		return rows.map((r) => ({
+			solicitation_id: r.solicitation_id,
+			challenge: r.challenge,
+			endorser_email: r.endorser_email,
+			endorser_name: r.endorser_name,
+			state: r.consumed === 1 ? "completed" : "pending",
+			solicited_at: r.solicited_at ?? r.created_at,
+		}));
+	}
+
+	findEndorsementSolicitation(solicitation_id: string):
+		| {
+				solicitation_id: string;
+				challenge: string;
+				endorser_email: string;
+				endorser_name: string | null;
+				value: unknown;
+				state: "pending" | "completed";
+		  }
+		| undefined {
+		const row = this.db
+			.prepare(
+				`SELECT solicitation_id, challenge, endorser_email, endorser_name, value_json, consumed
+				 FROM endorsement_challenges WHERE solicitation_id = ?`,
+			)
+			.get(solicitation_id) as
+			| {
+					solicitation_id: string;
+					challenge: string;
+					endorser_email: string;
+					endorser_name: string | null;
+					value_json: string;
+					consumed: number;
+			  }
+			| undefined;
+		if (!row) return undefined;
+		return {
+			solicitation_id: row.solicitation_id,
+			challenge: row.challenge,
+			endorser_email: row.endorser_email,
+			endorser_name: row.endorser_name,
+			value: JSON.parse(row.value_json),
+			state: row.consumed === 1 ? "completed" : "pending",
+		};
 	}
 
 	consumeEndorsementChallenge(challenge: string):

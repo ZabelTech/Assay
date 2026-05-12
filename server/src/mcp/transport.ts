@@ -22,7 +22,6 @@ import { handleGetClaim } from "../tools/get_claim.js";
 import { readIdentityResource } from "../resources/identity.js";
 import { readSchemaResource } from "../resources/schema.js";
 import { readServerInfoResource } from "../resources/server_info.js";
-import { handleEndorsementStart, handleEndorsementComplete } from "../verification/endorser.js";
 
 const MAX_REQUEST_BYTES = 5 * 1024 * 1024; // §12 — career objects under 5MB.
 const PROTOCOL_VERSION = "2025-06-18";
@@ -151,22 +150,6 @@ export function buildApp(depsIn: BuildAppDeps) {
 		claims: deps.claims,
 		mailer: deps.mailer,
 		evidenceStore: deps.evidenceStore,
-	});
-
-	app.post("/admin/api/endorsement/start", async (c) => {
-		const body = (await c.req.json().catch(() => ({}))) as {
-			endorser_email?: string;
-			endorser_name?: string;
-			value?: unknown;
-		};
-		const result = await handleEndorsementStart(deps, body);
-		return c.json(result, 202);
-	});
-	app.get("/admin/api/endorsement/complete", async (c) => {
-		const challenge = c.req.query("challenge");
-		const discloseLocal = c.req.query("disclose_local") === "1";
-		const ok = handleEndorsementComplete(deps, { challenge, discloseLocal });
-		return c.json({ ok }, ok ? 200 : 400);
 	});
 
 	// MCP transport: POST to /mcp, /mcp?t=, or /mcp/t/<token>

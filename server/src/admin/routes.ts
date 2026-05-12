@@ -10,6 +10,7 @@ import type { Mailer } from "../adapters/mailer.js";
 import type { EvidenceStore } from "../adapters/evidence_store.js";
 import { requireAdmin } from "./auth.js";
 import { mountAdminClaimRoutes } from "./claims.js";
+import { mountAdminEndorsementRoutes } from "./endorsement.js";
 import { mountAdminEvidenceRoutes } from "./evidence.js";
 import { mountAdminSubjectRoutes } from "./subject.js";
 
@@ -56,5 +57,14 @@ export function mountAdminRoutes(app: Hono, deps: AdminRouteDeps): void {
 		claims: deps.claims,
 		adminTokens: deps.adminTokens,
 		evidenceStore: deps.evidenceStore,
+	});
+
+	mountAdminEndorsementRoutes(app, {
+		adminTokens: deps.adminTokens,
+		subjects: deps.subjects,
+		claims: deps.claims,
+		mailer: deps.mailer,
+		operatorUrl: deps.operatorUrl,
+		defaultSubject: deps.subject,
 	});
 }

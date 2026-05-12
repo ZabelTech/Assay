@@ -61,8 +61,12 @@ CREATE TABLE IF NOT EXISTS endorsement_challenges (
 	endorser_name TEXT,
 	value_json TEXT NOT NULL,
 	created_at TEXT NOT NULL,
-	consumed INTEGER NOT NULL DEFAULT 0
+	consumed INTEGER NOT NULL DEFAULT 0,
+	solicitation_id TEXT,
+	solicited_at TEXT
 );
+
+CREATE INDEX IF NOT EXISTS idx_endorsement_solicitation ON endorsement_challenges (solicitation_id);
 
 CREATE TABLE IF NOT EXISTS admin_tokens (
 	token_hash TEXT PRIMARY KEY,
