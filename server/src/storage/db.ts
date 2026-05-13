@@ -94,6 +94,17 @@ CREATE TABLE IF NOT EXISTS claim_drafts (
 	updated_at TEXT NOT NULL,
 	body TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS pending_wiki_proposals (
+	proposal_id TEXT PRIMARY KEY,
+	kind TEXT NOT NULL CHECK (kind IN ('role', 'skill', 'industry')),
+	slug TEXT NOT NULL,
+	markdown TEXT NOT NULL,
+	target TEXT,
+	created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_pending_wiki_proposals_slug ON pending_wiki_proposals (slug);
 `;
 
 export function openDatabase(path: string): DB {

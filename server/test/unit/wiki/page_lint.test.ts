@@ -7,8 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-// Tools live outside server/. Vitest resolves the path at runtime.
-import { lintWiki } from "../../../../tools/wiki-check/lint.mjs";
+import { lintWiki } from "../../../src/wiki/page_lint.js";
 
 interface FakePage {
 	kind: "role" | "skill" | "industry";

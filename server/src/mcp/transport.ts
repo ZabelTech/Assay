@@ -18,6 +18,8 @@ import type { Structurer } from "../adapters/structurer.js";
 import type { EvidenceStore } from "../adapters/evidence_store.js";
 import type { Mailer } from "../adapters/mailer.js";
 import type { Synthesizer } from "../adapters/synthesizer.js";
+import type { PendingWikiProposalsRepo } from "../storage/pending_wiki_proposals.repo.js";
+import type { WikiRepo } from "../wiki/repo.js";
 import { mountAdminRoutes } from "../admin/routes.js";
 import { extractToken } from "./auth.js";
 import { CairnError } from "./errors.js";
@@ -100,6 +102,8 @@ export interface BuildAppDeps {
 	structurer: Structurer;
 	oauthProviders: Map<string, OAuthProvider>;
 	pdfParser: PdfParser;
+	wikiProposals: PendingWikiProposalsRepo;
+	wikiRepo: WikiRepo;
 	rateLimit: { window_ms: number; max: number };
 	corsOrigins: string[];
 }
@@ -168,6 +172,8 @@ export function buildApp(depsIn: BuildAppDeps) {
 		structurer: deps.structurer,
 		oauthProviders: deps.oauthProviders,
 		pdfParser: deps.pdfParser,
+		wikiProposals: deps.wikiProposals,
+		wikiRepo: deps.wikiRepo,
 	});
 
 	// MCP transport: POST to /mcp, /mcp?t=, or /mcp/t/<token>

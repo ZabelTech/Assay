@@ -3,6 +3,12 @@
 // that takes JSON-RPC requests and runs them through the same Hono pipeline real
 // clients hit.
 
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
 import type { Claim } from "../../src/domain/types.js";
 import type { CapturedEmail } from "../../src/adapters/mailer.js";
 import { buildApp } from "../../src/mcp/transport.js";
@@ -20,6 +26,8 @@ import { TokensRepo } from "../../src/storage/tokens.repo.js";
 import { AuditRepo } from "../../src/storage/audit.repo.js";
 import { HandlesRepo } from "../../src/storage/handles.repo.js";
 import { SubjectRepo } from "../../src/storage/subject.repo.js";
+import { PendingWikiProposalsRepo } from "../../src/storage/pending_wiki_proposals.repo.js";
+import { WikiRepo } from "../../src/wiki/repo.js";
 
 export type TokenForm = "header" | "query" | "path";
 
@@ -45,6 +53,9 @@ export interface TestServer {
 	structurer: MockStructurer;
 	oauthProviders: Map<string, OAuthProvider>;
 	pdfParser: MockPdfParser;
+	wikiProposals: PendingWikiProposalsRepo;
+	wikiRepo: WikiRepo;
+	wikiRepoDir: string;
 	adminToken: string;
 	issueToken(opts?: {
 		expires_at?: string;
@@ -88,6 +99,24 @@ export async function buildTestServer(opts: BuildTestServerOpts = {}): Promise<T
 	]);
 	const mailer = new CaptureMailer();
 	const synthesizer = new StubSynthesizer();
+	const wikiProposals = new PendingWikiProposalsRepo(db);
+	// Each test gets an isolated tmpdir for the wiki repo. Cleanup happens in
+	// close(). Tests that actually exercise promote() must call
+	// `await ts.wikiRepo.initIfMissing()` first; the constructor is cheap so
+	// tests that don't touch wiki proposals pay nothing.
+	const wikiRepoDir = mkdtempSync(join(tmpdir(), "assay-wiki-repo-"));
+	// Absolute paths — the pre-commit hook runs from the wiki repo's cwd, not
+	// project root, so relative resolution won't find tsx or the CLI source.
+	const projectRoot = resolve(HERE, "..", "..", "..");
+	const tsxBin = resolve(projectRoot, "node_modules", ".bin", "tsx");
+	const linterCliPath = resolve(projectRoot, "server", "src", "wiki", "page_lint_cli.ts");
+	const wikiRepo = new WikiRepo({
+		repoDir: wikiRepoDir,
+		seedDir: resolve(projectRoot, "wiki"),
+		// In tests we invoke the linter via tsx against the TS source so we don't
+		// need a build step. Production passes `node <dist-cli>` here.
+		linterCommand: `${tsxBin} ${linterCliPath}`,
+	});
 
 	const { token: adminToken } = adminTokens.issue();
 
@@ -121,6 +150,8 @@ export async function buildTestServer(opts: BuildTestServerOpts = {}): Promise<T
 		structurer,
 		oauthProviders,
 		pdfParser,
+		wikiProposals,
+		wikiRepo,
 		rateLimit: opts.rateLimit ?? { window_ms: 60_000, max: 60 },
 		corsOrigins: ["*"],
 	});
@@ -150,6 +181,9 @@ export async function buildTestServer(opts: BuildTestServerOpts = {}): Promise<T
 		structurer,
 		oauthProviders,
 		pdfParser,
+		wikiProposals,
+		wikiRepo,
+		wikiRepoDir,
 		adminToken,
 		issueToken(o = {}) {
 			return tokens.issue({
@@ -211,6 +245,7 @@ export async function buildTestServer(opts: BuildTestServerOpts = {}): Promise<T
 		},
 		close() {
 			db.close();
+			rmSync(wikiRepoDir, { recursive: true, force: true });
 		},
 	};
 }

@@ -1,4 +1,6 @@
 // Entrypoint: load config, wire dependencies, start Hono on @hono/node-server.
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
 import { loadConfig } from "./config.js";
 import { CaptureMailer, SmtpMailer } from "./adapters/mailer.js";
@@ -15,6 +17,8 @@ import { TokensRepo } from "./storage/tokens.repo.js";
 import { AuditRepo } from "./storage/audit.repo.js";
 import { HandlesRepo } from "./storage/handles.repo.js";
 import { SubjectRepo } from "./storage/subject.repo.js";
+import { PendingWikiProposalsRepo } from "./storage/pending_wiki_proposals.repo.js";
+import { WikiRepo } from "./wiki/repo.js";
 import { buildApp } from "./mcp/transport.js";
 
 const cfg = loadConfig();
@@ -38,6 +42,19 @@ const mailer =
 			})
 		: new CaptureMailer();
 
+// Resolve the bundled wiki linter CLI path. In the Dockerfile prod layout the
+// CLI sits at server/dist/wiki/page_lint_cli.js next to this entrypoint. The
+// pre-commit hook script invokes `node <path> <repoDir>`.
+const HERE = dirname(fileURLToPath(import.meta.url));
+const linterCliJs = resolve(HERE, "wiki/page_lint_cli.js");
+const wikiRepo = new WikiRepo({
+	repoDir: cfg.wikiRepoDir,
+	seedDir: cfg.wikiSeedDir,
+	linterCommand: `node ${linterCliJs}`,
+	authorEmail: cfg.subject,
+});
+await wikiRepo.initIfMissing();
+
 const app = buildApp({
 	subject: cfg.subject,
 	operatorUrl: cfg.operatorUrl,
@@ -51,6 +68,8 @@ const app = buildApp({
 	handles: new HandlesRepo(db),
 	drafts: new ClaimDraftsRepo(db),
 	evidenceStore: new LocalEvidenceStore(cfg.evidenceDir),
+	wikiProposals: new PendingWikiProposalsRepo(db),
+	wikiRepo,
 	structurer: new MockStructurer(),
 	pdfParser: new MockPdfParser(),
 	oauthProviders: new Map([

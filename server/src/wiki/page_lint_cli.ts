@@ -1,8 +1,9 @@
 #!/usr/bin/env node
-// #16 wiki-check CLI. Walks ./wiki and prints errors + warnings. Exits non-zero on
-// any error; warnings are surfaced but do not fail CI.
+// #16 wiki-check CLI. Walks the given root (default: ./wiki), prints errors and
+// warnings, exits non-zero on any error. Lives in the server tree so production
+// builds can run the same lint logic that CI uses.
 import { resolve } from "node:path";
-import { lintWiki } from "./lint.mjs";
+import { lintWiki } from "./page_lint.js";
 
 const root = resolve(process.argv[2] ?? "wiki");
 const { errors, warnings } = await lintWiki(root);

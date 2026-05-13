@@ -15,6 +15,8 @@ import type { EvidenceStore } from "../adapters/evidence_store.js";
 import type { OAuthProvider } from "../adapters/oauth.js";
 import type { PdfParser } from "../adapters/pdf_parser.js";
 import type { Structurer } from "../adapters/structurer.js";
+import type { PendingWikiProposalsRepo } from "../storage/pending_wiki_proposals.repo.js";
+import type { WikiRepo } from "../wiki/repo.js";
 import { requireAdmin } from "./auth.js";
 import { mountAdminAuditRoutes } from "./audit.js";
 import { mountAdminClaimRoutes } from "./claims.js";
@@ -24,6 +26,7 @@ import { mountAdminHandleRoutes } from "./handle.js";
 import { mountAdminImportsRoutes } from "./imports.js";
 import { mountAdminSubjectRoutes } from "./subject.js";
 import { mountAdminTokenRoutes } from "./tokens.js";
+import { mountAdminWikiProposalsRoutes } from "./wiki_proposals.js";
 
 export interface AdminRouteDeps {
 	subject: string;
@@ -42,6 +45,8 @@ export interface AdminRouteDeps {
 	structurer: Structurer;
 	oauthProviders: Map<string, OAuthProvider>;
 	pdfParser: PdfParser;
+	wikiProposals: PendingWikiProposalsRepo;
+	wikiRepo: WikiRepo;
 }
 
 export function mountAdminRoutes(app: Hono, deps: AdminRouteDeps): void {
@@ -115,5 +120,11 @@ export function mountAdminRoutes(app: Hono, deps: AdminRouteDeps): void {
 		oauthProviders: deps.oauthProviders,
 		pdfParser: deps.pdfParser,
 		defaultSubject: deps.subject,
+	});
+
+	mountAdminWikiProposalsRoutes(app, {
+		adminTokens: deps.adminTokens,
+		proposals: deps.wikiProposals,
+		wikiRepo: deps.wikiRepo,
 	});
 }
