@@ -161,9 +161,33 @@ export class CodexCliStructurer implements Structurer {
 			proc.stdin.write(prompt);
 			proc.stdin.end();
 
-			const result = await parseJsonlStream(proc.stdout);
-			await proc.waitForExit();
-			return result;
+			// Collect stderr in parallel so we can include it in error messages.
+			// Real codex prints diagnostic text to stderr that explains failures
+			// the JSONL error events alone don't surface clearly.
+			const stderrChunks: string[] = [];
+			(async () => {
+				for await (const chunk of proc.stderr) {
+					stderrChunks.push(
+						typeof chunk === "string" ? chunk : (chunk as Buffer).toString("utf8"),
+					);
+				}
+			})();
+
+			const debug = process.env.CODEX_CLI_DEBUG === "1";
+			try {
+				const result = await parseJsonlStream(proc.stdout, { debug });
+				await proc.waitForExit();
+				return result;
+			} catch (err) {
+				// Attach captured stderr to whatever typed error we threw so the
+				// operator sees what codex itself reported.
+				await proc.waitForExit().catch(() => undefined);
+				const stderr = stderrChunks.join("").trim();
+				if (err instanceof Error && stderr) {
+					(err as Error).message = `${err.message}\n--- codex stderr ---\n${stderr}`;
+				}
+				throw err;
+			}
 		} finally {
 			try {
 				rmSync(tmpDir, { recursive: true, force: true });
@@ -328,16 +352,37 @@ const STRUCTURE_RESULT_SCHEMA = {
 
 // ---------------- JSONL parsing ----------------
 
-// Codex `exec --json` emits a JSONL stream of events. The final
-// `agent_message` carries the structured response (its `content` is the JSON
+// Codex `exec --json` emits a JSONL stream of events. The structured response
+// arrives in an `agent_message`-style event (its `content` is the JSON
 // document matching --output-schema). Error events with known symbols are
-// mapped to typed errors. Unknown event types are skipped.
-async function parseJsonlStream(stdout: Readable): Promise<StructureResult> {
+// mapped to typed errors; other event types are skipped. Real codex emits a
+// few different event shapes — we accept several common keys for content and
+// error detail so we don't silently lose information.
+async function parseJsonlStream(
+	stdout: Readable,
+	opts: { debug?: boolean } = {},
+): Promise<StructureResult> {
 	let agentMessage: unknown = undefined;
+	const recentLines: string[] = []; // ring buffer for diagnostics on schema violation
 	for await (const line of readLines(stdout)) {
 		const trimmed = line.trim();
 		if (trimmed === "") continue;
-		let event: { type?: string; content?: unknown; symbol?: string; detail?: string };
+		// Keep the last 10 events for diagnostic dumps.
+		recentLines.push(trimmed);
+		if (recentLines.length > 10) recentLines.shift();
+		if (opts.debug) {
+			// biome-ignore lint/suspicious/noConsoleLog: explicit opt-in via CODEX_CLI_DEBUG=1.
+			console.error(`[codex] ${trimmed}`);
+		}
+		let event: {
+			type?: string;
+			content?: unknown;
+			text?: unknown;
+			message?: string;
+			detail?: string;
+			symbol?: string;
+			error?: { message?: string; symbol?: string; detail?: string };
+		};
 		try {
 			event = JSON.parse(trimmed) as typeof event;
 		} catch {
@@ -345,23 +390,45 @@ async function parseJsonlStream(stdout: Readable): Promise<StructureResult> {
 			// promises one event per line.
 			continue;
 		}
-		if (event.type === "error") {
-			throwTyped(event);
+		if (isErrorEvent(event.type)) {
+			throwTyped(event, trimmed);
 		}
-		if (event.type === "agent_message") {
-			agentMessage = event.content;
+		if (isResultEvent(event.type)) {
+			agentMessage = event.content ?? event.text;
 		}
-		// All other event types (turn_started, tool_call, etc.) are ignored.
 	}
 	if (agentMessage === undefined) {
-		throw new CodexSchemaViolationError("no agent_message event in JSONL stream");
+		throw new CodexSchemaViolationError(
+			`no final-message event in JSONL stream. Last events:\n${recentLines.join("\n")}`,
+		);
 	}
 	return coerceStructureResult(agentMessage);
 }
 
-function throwTyped(event: { symbol?: string; detail?: string }): never {
-	const detail = event.detail ?? event.symbol ?? "unknown error";
-	switch (event.symbol) {
+// Accept the common event-type spellings real codex has shipped under: the
+// stable `agent_message`, plus `task_complete`, `final_message`, and
+// `message` which appear in some versions / SDK shims.
+function isResultEvent(t: unknown): boolean {
+	return t === "agent_message" || t === "task_complete" || t === "final_message" || t === "message";
+}
+
+function isErrorEvent(t: unknown): boolean {
+	return t === "error" || t === "task_failed" || t === "session_error";
+}
+
+function throwTyped(
+	event: {
+		type?: string;
+		symbol?: string;
+		detail?: string;
+		message?: string;
+		error?: { message?: string; symbol?: string; detail?: string };
+	},
+	raw: string,
+): never {
+	const symbol = event.symbol ?? event.error?.symbol;
+	const detail = event.detail ?? event.error?.detail ?? event.message ?? event.error?.message ?? raw;
+	switch (symbol) {
 		case "quota_exceeded":
 		case "rate_limit_exceeded":
 			throw new CodexQuotaExceededError(detail);
@@ -371,7 +438,10 @@ function throwTyped(event: { symbol?: string; detail?: string }): never {
 		case "schema_violation":
 			throw new CodexSchemaViolationError(detail);
 		default:
-			throw new Error(`codex exec error: ${detail}`);
+			// Surface the raw event so the operator can see the actual codex
+			// event shape — symbol/detail fields may have moved between codex
+			// versions and we need the diagnostic to update the parser.
+			throw new Error(`codex exec error (unmapped): ${detail}\nraw: ${raw}`);
 	}
 }
 
