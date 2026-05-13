@@ -110,8 +110,13 @@ export class ImportPipeline {
 		const rawBuffer = typeof input.raw === "string" ? Buffer.from(input.raw, "utf8") : input.raw;
 		const rawPut = this.deps.evidenceStore.put(rawBuffer, input.rawMediaType);
 
-		// 2) Normalize raw → markdown corpus file(s).
-		const normalized: NormalizedSource = await normalizer.normalize(input.raw);
+		// 2) Normalize raw → markdown corpus file(s). Forward source_url +
+		//    media_type via the context so url-snapshot (and any future
+		//    context-aware normalizer) can populate frontmatter correctly.
+		const normalized: NormalizedSource = await normalizer.normalize(input.raw, {
+			source_url: input.source_url,
+			media_type: input.rawMediaType,
+		});
 
 		// 3) Write the primary corpus file and any sub-items the normalizer
 		//    surfaced (LinkedIn articles, GitHub repos), bumping the version
@@ -199,6 +204,7 @@ export class ImportPipeline {
 					value: validated.value,
 					visibility: validated.visibility,
 					origin: d.origin,
+					wiki_slugs_used: result.wiki_slugs_used,
 				});
 				drafts.push(created);
 			}
@@ -305,6 +311,13 @@ export class ImportPipeline {
 					updated_at: now,
 				};
 				this.deps.claims.insert(claim);
+				// #16 wiki usage hook: record one row per (slug, claim_id)
+				// for slugs the structurer reported consuming when this draft
+				// was produced. The staleness-exemption logic is future work;
+				// the data hook is in v0.
+				for (const slug of draft.wiki_slugs_used ?? []) {
+					this.deps.wikiPageUses.record({ slug, claim_id: claim.claim_id });
+				}
 				// Drop the draft now that it's a claim.
 				this.deps.drafts.delete(draft.draft_id);
 				claim_ids.push(claim.claim_id);

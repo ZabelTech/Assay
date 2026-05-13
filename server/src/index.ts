@@ -15,6 +15,7 @@ import {
 	LinkedinNormalizer,
 	PasteNormalizer,
 	PdfNormalizer,
+	UrlSnapshotNormalizer,
 	type SourceNormalizerRegistry,
 } from "./adapters/source_normalizer.js";
 import { StubSynthesizer } from "./adapters/synthesizer.js";
@@ -97,6 +98,7 @@ const normalizers: SourceNormalizerRegistry = {
 	pdf: new PdfNormalizer(pdfParser),
 	linkedin: new LinkedinNormalizer(),
 	github: new GithubNormalizer(),
+	"url-snapshot": new UrlSnapshotNormalizer(),
 };
 
 const pipeline = new ImportPipeline({

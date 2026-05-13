@@ -25,6 +25,7 @@ import {
 	LinkedinNormalizer,
 	PasteNormalizer,
 	PdfNormalizer,
+	UrlSnapshotNormalizer,
 	type SourceNormalizerRegistry,
 } from "../../src/adapters/source_normalizer.js";
 import { ClaimDraftsRepo } from "../../src/storage/claim_drafts.repo.js";
@@ -144,6 +145,7 @@ export async function buildTestServer(opts: BuildTestServerOpts = {}): Promise<T
 		pdf: new PdfNormalizer(pdfParser),
 		linkedin: new LinkedinNormalizer(),
 		github: new GithubNormalizer(),
+		"url-snapshot": new UrlSnapshotNormalizer(),
 	};
 	const pipeline = new ImportPipeline({
 		db,

@@ -79,4 +79,9 @@ export interface StructureResult {
 	drafts: DraftInput[];
 	conflicts: ConflictRecord[];
 	wiki_proposals?: WikiProposalDraft[];
+	// Slugs of wiki pages the structurer materially read in this run. The
+	// pipeline records `wiki_page_uses` rows at publish time for each
+	// resulting claim. Powers the future stale-by-use exemption (#16) — v0
+	// ships the hook only; the staleness logic is later work.
+	wiki_slugs_used?: string[];
 }

@@ -49,6 +49,12 @@ export interface MockDraftFixture {
 export class MockStructurer implements Structurer {
 	private fixtures = new Map<string, MockDraftFixture[]>();
 	private wikiProposals = new Map<string, WikiProposalDraft[]>();
+	private webQueries = new Map<string, string>();
+	private consumedWiki = new Map<string, string[]>();
+	// When set, MockStructurer appends `_target_role: target.role` to every
+	// draft's value so target-based steering is observable in tests. Real
+	// LlmStructurers wouldn't need this — they'd use the target to prioritize.
+	private exposeTarget = false;
 
 	// Backwards-compatible registration that #7 tests use. The string key is the
 	// `source_type` (also the `source` field on the resulting drafts — matches
@@ -61,6 +67,28 @@ export class MockStructurer implements Structurer {
 	// drafts when it sees a given source_type. Test-only.
 	registerWikiProposal(source_type: string, proposals: WikiProposalDraft[]): void {
 		this.wikiProposals.set(source_type, proposals);
+	}
+
+	// Register a query the Mock should hit via the WebSearch adapter when it
+	// processes a given source_type. The results are appended to each draft's
+	// value as `_web_corroboration` so tests can assert (a) web.search was
+	// invoked, (b) results landed where the structurer would consume them.
+	useWebQuery(source_type: string, query: string): void {
+		this.webQueries.set(source_type, query);
+	}
+
+	// Register the wiki slugs the Mock should report as "consumed" when it
+	// processes a given source_type. The pipeline records wiki_page_uses
+	// rows for these at publish time.
+	registerConsumedWiki(source_type: string, slugs: string[]): void {
+		this.consumedWiki.set(source_type, slugs);
+	}
+
+	// Switch on the steering hook: drafts get `_target_role` set to
+	// `target.role`. Tests assert two runs with different targets produce
+	// measurably different drafts.
+	enableTargetExposure(): void {
+		this.exposeTarget = true;
 	}
 
 	async structure(input: {
@@ -106,14 +134,28 @@ export class MockStructurer implements Structurer {
 			}
 		}
 
+		const wiki_slugs_used: string[] = [];
 		for (const source_type of seenSourceTypes) {
 			const pin = pinByType.get(source_type)!;
 			const fixture = this.fixtures.get(source_type);
+			// Web-search hook: when a query is registered, hit the adapter and
+			// hand the structurer's result-shape back to tests via the draft's
+			// value. A real LLM would feed these into its context window.
+			let webCorroboration: { url: string; title: string }[] | undefined;
+			const query = this.webQueries.get(source_type);
+			if (query) {
+				const results = await input.web.search(query);
+				webCorroboration = results.map((r) => ({ url: r.url, title: r.title }));
+			}
+			// Steering exposure: surface target.role into the draft value so
+			// tests can assert different targets produce different output.
+			const targetTag = this.exposeTarget && input.target?.role ? { _target_role: input.target.role } : {};
+			const webTag = webCorroboration ? { _web_corroboration: webCorroboration } : {};
 			if (fixture && fixture.length > 0) {
 				for (const f of fixture) {
 					drafts.push({
 						type: f.type,
-						value: f.value,
+						value: { ...f.value, ...webTag, ...targetTag },
 						visibility: f.visibility,
 						origin: [{ path: pin.path, version: pin.version }],
 					});
@@ -122,13 +164,15 @@ export class MockStructurer implements Structurer {
 				const file = input.corpus.read(pin.path, pin.version);
 				drafts.push({
 					type: "narrative",
-					value: { text: file.body, scope: source_type },
+					value: { text: file.body, scope: source_type, ...webTag, ...targetTag },
 					origin: [{ path: pin.path, version: pin.version }],
 				});
 			}
 			const proposals = this.wikiProposals.get(source_type);
 			if (proposals) wiki_proposals.push(...proposals);
+			const consumed = this.consumedWiki.get(source_type);
+			if (consumed) wiki_slugs_used.push(...consumed);
 		}
-		return { drafts, conflicts: [], wiki_proposals };
+		return { drafts, conflicts: [], wiki_proposals, wiki_slugs_used };
 	}
 }

@@ -25,10 +25,17 @@ export interface AdditionalSource {
 	frontmatter: Pick<CorpusFrontmatter, "source_type" | "source_url">;
 }
 
+export interface NormalizeContext {
+	source_url?: string;
+	media_type?: string;
+}
+
 export interface SourceNormalizer {
 	// Buffer for binary sources (PDF, image); string for text sources (paste,
-	// HTML, JSON). The pipeline picks the type at the call site.
-	normalize(raw: Buffer | string): Promise<NormalizedSource>;
+	// HTML, JSON). The pipeline picks the type at the call site and forwards
+	// any context (e.g. source_url for url-snapshot) so the normalizer can
+	// populate its frontmatter.
+	normalize(raw: Buffer | string, context?: NormalizeContext): Promise<NormalizedSource>;
 }
 
 export type SourceNormalizerRegistry = Record<string, SourceNormalizer>;
@@ -156,24 +163,21 @@ export class GithubNormalizer implements SourceNormalizer {
 // pass-through-with-codeblock — full HTML→markdown is a follow-up and not in
 // the load-bearing path (the verifier reads the corpus body for substring
 // matching, which works on the raw text as well).
+//
+// Implements SourceNormalizer so the pipeline drives it via the registry like
+// every other normalizer. The pipeline passes the source_url and media_type
+// through `context`; without context (i.e. when called from a non-pipeline
+// path) the normalizer falls back to source_url=null and a plain code-fence.
 
-export interface UrlSnapshotNormalizerInput {
-	raw: Buffer;
-	mediaType: string;
-	sourceUrl: string;
-}
-
-export class UrlSnapshotNormalizer {
-	async normalize(input: UrlSnapshotNormalizerInput): Promise<NormalizedSource> {
-		const text = input.raw.toString("utf8");
-		// For HTML or unknown, wrap the raw text in a code fence so it round-
-		// trips through the structurer + verifier without markdown reinterp.
-		// A future LlmStructurer might want a cleaner HTML→markdown — that
-		// lands when the LLM lands.
-		const body = /^text\/markdown\b/i.test(input.mediaType) ? text : "```\n" + text + "\n```";
+export class UrlSnapshotNormalizer implements SourceNormalizer {
+	async normalize(raw: Buffer | string, context?: NormalizeContext): Promise<NormalizedSource> {
+		const bytes = typeof raw === "string" ? Buffer.from(raw, "utf8") : raw;
+		const text = bytes.toString("utf8");
+		const mediaType = context?.media_type ?? "application/octet-stream";
+		const body = /^text\/markdown\b/i.test(mediaType) ? text : "```\n" + text + "\n```";
 		return {
 			body,
-			frontmatter: { source_type: "url-snapshot", source_url: input.sourceUrl },
+			frontmatter: { source_type: "url-snapshot", source_url: context?.source_url ?? null },
 		};
 	}
 }

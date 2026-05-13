@@ -18,6 +18,11 @@ export interface ClaimDraft {
 	// sites (which the pipeline now subsumes) didn't, hence the optional
 	// shape for back-compat in test fixtures that bypass create().
 	origin?: CorpusOrigin[];
+	// #15 / #16 wiki page slugs the structurer consulted in the run that
+	// produced this draft. At publish the pipeline writes one
+	// wiki_page_uses row per (slug, claim_id) so the usage hook (#16)
+	// has data when the staleness exemption logic lands later.
+	wiki_slugs_used?: string[];
 	created_at: string;
 	updated_at: string;
 }
@@ -31,6 +36,7 @@ export class ClaimDraftsRepo {
 		value: Record<string, unknown>;
 		visibility?: Visibility;
 		origin?: CorpusOrigin[];
+		wiki_slugs_used?: string[];
 	}): ClaimDraft {
 		const now = new Date().toISOString();
 		const draft: ClaimDraft = {
@@ -40,6 +46,7 @@ export class ClaimDraftsRepo {
 			value: opts.value,
 			visibility: opts.visibility ?? (opts.type === "compensation" ? "private" : "permissioned"),
 			origin: opts.origin ?? [],
+			wiki_slugs_used: opts.wiki_slugs_used,
 			created_at: now,
 			updated_at: now,
 		};
