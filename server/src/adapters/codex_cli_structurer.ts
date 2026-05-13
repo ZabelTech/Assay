@@ -329,6 +329,7 @@ async function parseJsonlStream(
 			message?: string;
 			detail?: string;
 			symbol?: string;
+			item?: { type?: string; text?: unknown; content?: unknown };
 			error?: { message?: string; symbol?: string; detail?: string };
 		};
 		try {
@@ -341,7 +342,13 @@ async function parseJsonlStream(
 		if (isErrorEvent(event.type)) {
 			throwTyped(event, trimmed);
 		}
-		if (isResultEvent(event.type)) {
+		// Real codex (v0.80+) wraps the structured response in an
+		// `item.completed` event whose `item.type === "agent_message"` and
+		// whose `item.text` is the JSON document. Some earlier versions emit
+		// `agent_message` at the top level directly; accept both.
+		if (event.type === "item.completed" && event.item?.type === "agent_message") {
+			agentMessage = event.item.text ?? event.item.content;
+		} else if (isResultEvent(event.type)) {
 			agentMessage = event.content ?? event.text;
 		}
 	}
@@ -353,9 +360,10 @@ async function parseJsonlStream(
 	return coerceStructureResult(agentMessage);
 }
 
-// Accept the common event-type spellings real codex has shipped under: the
-// stable `agent_message`, plus `task_complete`, `final_message`, and
-// `message` which appear in some versions / SDK shims.
+// Top-level event types codex has shipped under as the direct result-bearing
+// event. v0.80+ wraps results in `item.completed`; older versions / SDK shims
+// emit `agent_message` / `task_complete` / `final_message` / `message`
+// directly. Both paths are handled in parseJsonlStream.
 function isResultEvent(t: unknown): boolean {
 	return t === "agent_message" || t === "task_complete" || t === "final_message" || t === "message";
 }

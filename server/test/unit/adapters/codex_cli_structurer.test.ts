@@ -192,6 +192,39 @@ describe("#18 CodexCliStructurer", () => {
 			expect(result.drafts[0]!.value).toEqual({ name: "Rust" });
 		});
 
+		it("unwraps the v0.80+ `item.completed` event with nested agent_message", async () => {
+			// WHY: real codex (v0.80+) wraps the structured response in
+			// {type:"item.completed", item:{type:"agent_message", text:"..."}}.
+			// Our parser must look inside `item`, not just at the top-level event.
+			recorder.queueEvents([
+				{ type: "thread.started", thread_id: "t1" },
+				{ type: "turn.started" },
+				{
+					type: "item.completed",
+					item: {
+						id: "item_0",
+						type: "agent_message",
+						text: JSON.stringify({
+							drafts: [
+								{
+									type: "skill",
+									value: { name: "Distributed systems" },
+									origin: [{ path: "paste.md", version: 1 }],
+								},
+							],
+							conflicts: [],
+							wiki_slugs_used: ["distributed-systems"],
+						}),
+					},
+				},
+				{ type: "turn.completed", usage: { input_tokens: 100, output_tokens: 50 } },
+			]);
+			const corpus = new FakeCorpus([corpusFile("paste.md", "paste", "x")]);
+			const result = await makeStructurer(recorder.spawner).structure({ corpus, wiki, web });
+			expect(result.drafts[0]!.type).toBe("skill");
+			expect(result.wiki_slugs_used).toEqual(["distributed-systems"]);
+		});
+
 		it("preserves wiki_proposals and wiki_slugs_used when present", async () => {
 			recorder.queueEvents([
 				{
