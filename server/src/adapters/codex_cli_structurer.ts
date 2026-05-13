@@ -13,8 +13,7 @@
 // unknown event types.
 
 import { spawn as nodeSpawn } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { Readable, Writable } from "node:stream";
 import type {
@@ -137,68 +136,58 @@ export class CodexCliStructurer implements Structurer {
 		target?: Target;
 		new_origins?: CorpusOrigin[];
 	}): Promise<StructureResult> {
-		// Build the run inputs: which corpus files are in-scope, the prompt
-		// body the model reads, and the JSON Schema constraining its output.
+		// Build the run inputs: which corpus files are in-scope and the prompt
+		// body the model reads. We steer the JSON output via prompt rather than
+		// OpenAI's structured-outputs `--output-schema` mode — that mode rejects
+		// free-form `object` fields and our DraftInput.value is per-Cairn-type
+		// (can't be enumerated without an unworkable mega-schema). Free-form
+		// JSON via the prompt is the pragmatic path.
 		const inScopeOrigins = selectInScopeOrigins(input.corpus, input.new_origins);
 		const corpusFiles = inScopeOrigins.map((o) => input.corpus.read(o.path, o.version));
 		const wikiPages = input.wiki.list().map((ref) => input.wiki.read(ref.slug));
 		const prompt = buildPrompt({ corpusFiles, wikiPages, target: input.target });
 
-		const tmpDir = mkdtempSync(join(tmpdir(), "codex-structurer-"));
-		const schemaPath = join(tmpDir, "schema.json");
-		writeFileSync(schemaPath, JSON.stringify(STRUCTURE_RESULT_SCHEMA, null, 2));
+		const argv = [
+			"exec",
+			"--json",
+			"--skip-git-repo-check",
+			"--model",
+			this.model,
+		];
+		const proc = this.spawner(this.codexBinary, argv);
 
+		// Prompt content goes via stdin (never argv) — corpus content can
+		// contain shell metachars or prompt-injection text, and stdin
+		// sidesteps argv-length limits anyway.
+		proc.stdin.write(prompt);
+		proc.stdin.end();
+
+		// Collect stderr in parallel so we can include it in error messages.
+		// Real codex prints diagnostic text to stderr that explains failures
+		// the JSONL error events alone don't surface clearly.
+		const stderrChunks: string[] = [];
+		(async () => {
+			for await (const chunk of proc.stderr) {
+				stderrChunks.push(
+					typeof chunk === "string" ? chunk : (chunk as Buffer).toString("utf8"),
+				);
+			}
+		})();
+
+		const debug = process.env.CODEX_CLI_DEBUG === "1";
 		try {
-			const argv = [
-				"exec",
-				"--json",
-				"--skip-git-repo-check",
-				"--output-schema",
-				schemaPath,
-				"--model",
-				this.model,
-			];
-			const proc = this.spawner(this.codexBinary, argv);
-
-			// Prompt content goes via stdin (never argv) — corpus content can
-			// contain shell metachars or prompt-injection text, and stdin
-			// sidesteps argv-length limits anyway.
-			proc.stdin.write(prompt);
-			proc.stdin.end();
-
-			// Collect stderr in parallel so we can include it in error messages.
-			// Real codex prints diagnostic text to stderr that explains failures
-			// the JSONL error events alone don't surface clearly.
-			const stderrChunks: string[] = [];
-			(async () => {
-				for await (const chunk of proc.stderr) {
-					stderrChunks.push(
-						typeof chunk === "string" ? chunk : (chunk as Buffer).toString("utf8"),
-					);
-				}
-			})();
-
-			const debug = process.env.CODEX_CLI_DEBUG === "1";
-			try {
-				const result = await parseJsonlStream(proc.stdout, { debug });
-				await proc.waitForExit();
-				return result;
-			} catch (err) {
-				// Attach captured stderr to whatever typed error we threw so the
-				// operator sees what codex itself reported.
-				await proc.waitForExit().catch(() => undefined);
-				const stderr = stderrChunks.join("").trim();
-				if (err instanceof Error && stderr) {
-					(err as Error).message = `${err.message}\n--- codex stderr ---\n${stderr}`;
-				}
-				throw err;
+			const result = await parseJsonlStream(proc.stdout, { debug });
+			await proc.waitForExit();
+			return result;
+		} catch (err) {
+			// Attach captured stderr to whatever typed error we threw so the
+			// operator sees what codex itself reported.
+			await proc.waitForExit().catch(() => undefined);
+			const stderr = stderrChunks.join("").trim();
+			if (err instanceof Error && stderr) {
+				(err as Error).message = `${err.message}\n--- codex stderr ---\n${stderr}`;
 			}
-		} finally {
-			try {
-				rmSync(tmpDir, { recursive: true, force: true });
-			} catch {
-				// best-effort cleanup
-			}
+			throw err;
 		}
 	}
 }
@@ -248,18 +237,48 @@ export function buildPrompt(input: {
 }
 
 const SYSTEM_PREAMBLE = `You are extracting Cairn-protocol claim drafts from a candidate's own
-imported sources. Respond ONLY with a JSON document matching the supplied
-JSON Schema (a StructureResult). Every draft you emit MUST:
+imported sources.
 
-- carry an "origin" array of {path, version} pointers into the supplied corpus
-  files (use the exact strings shown in the [corpus:PATH@vVERSION] headers),
-- contain only content that is supported by the cited corpus files (do not
-  invent facts to match the target — surface what is there),
-- use the candidate-supplied target (if any) to prioritize which claims are
-  most relevant, not to fabricate.
+Respond ONLY with a single JSON document — no prose before, no prose after,
+no markdown fences. The JSON document is a StructureResult with this shape:
 
-Conflicting facts across sources go into the "conflicts" array as
-ConflictRecord{contenders, rationale}; do not auto-merge.`;
+{
+  "drafts": [
+    {
+      "type": "skill" | "employment" | "education" | "project" | "publication"
+            | "credential" | "endorsement" | "availability" | "preference"
+            | "compensation" | "narrative" | "identity",
+      "value": { ...per-type fields per Cairn spec §6.2... },
+      "visibility": "public" | "permissioned" | "private",   // optional
+      "origin": [ { "path": "linkedin.md", "version": 3 }, ... ]   // 1+ items
+    }
+  ],
+  "conflicts": [
+    {
+      "contenders": [
+        { "kind": "draft", "draft": { ...DraftInput... } },
+        { "kind": "published", "claim_id": "clm_..." }
+      ],
+      "rationale": "..."
+    }
+  ],
+  "wiki_proposals": [   // optional
+    { "kind": "role" | "skill" | "industry", "slug": "...", "markdown": "..." }
+  ],
+  "wiki_slugs_used": [ "..." ]   // optional; wiki slugs you materially read
+}
+
+Rules every draft MUST follow:
+- "origin" lists 1+ pointers into the supplied corpus files. Use the exact
+  path strings shown in the [corpus:PATH@vVERSION] headers below; "version"
+  is the integer after the v.
+- "value" contains only content supported by the cited corpus files. Do not
+  invent facts to match the candidate's target — surface what is there.
+- Use the target (if any) to prioritize which claims are most relevant, not
+  to fabricate.
+- Conflicting facts across sources go into the "conflicts" array, not
+  auto-merged.
+- If there are no conflicts, emit "conflicts": [].`;
 
 // ---------------- In-scope filter ----------------
 
@@ -278,82 +297,6 @@ export function selectInScopeOrigins(
 }
 
 // ---------------- JSON Schema for StructureResult ----------------
-
-// Hand-rolled to avoid pulling in zod-to-json-schema. Mirrors
-// pipeline/types.ts. Update both together if either changes.
-const STRUCTURE_RESULT_SCHEMA = {
-	$schema: "https://json-schema.org/draft/2020-12/schema",
-	type: "object",
-	required: ["drafts", "conflicts"],
-	additionalProperties: false,
-	properties: {
-		drafts: {
-			type: "array",
-			items: {
-				type: "object",
-				required: ["type", "value", "origin"],
-				properties: {
-					type: { type: "string" },
-					value: { type: "object" },
-					visibility: { enum: ["public", "permissioned", "private"] },
-					origin: {
-						type: "array",
-						minItems: 1,
-						items: {
-							type: "object",
-							required: ["path", "version"],
-							properties: {
-								path: { type: "string" },
-								version: { type: "integer" },
-							},
-						},
-					},
-				},
-			},
-		},
-		conflicts: {
-			type: "array",
-			items: {
-				type: "object",
-				required: ["contenders", "rationale"],
-				properties: {
-					contenders: {
-						type: "array",
-						minItems: 2,
-						items: {
-							oneOf: [
-								{
-									type: "object",
-									required: ["kind", "draft"],
-									properties: { kind: { const: "draft" }, draft: { type: "object" } },
-								},
-								{
-									type: "object",
-									required: ["kind", "claim_id"],
-									properties: { kind: { const: "published" }, claim_id: { type: "string" } },
-								},
-							],
-						},
-					},
-					rationale: { type: "string" },
-				},
-			},
-		},
-		wiki_proposals: {
-			type: "array",
-			items: {
-				type: "object",
-				required: ["kind", "slug", "markdown"],
-				properties: {
-					kind: { enum: ["role", "skill", "industry"] },
-					slug: { type: "string" },
-					markdown: { type: "string" },
-				},
-			},
-		},
-		wiki_slugs_used: { type: "array", items: { type: "string" } },
-	},
-} as const;
 
 // ---------------- JSONL parsing ----------------
 
@@ -451,14 +394,17 @@ function throwTyped(
 }
 
 function coerceStructureResult(raw: unknown): StructureResult {
-	// `content` may arrive as a string (typical for chat-style models even
-	// under --output-schema) or as a parsed object. Accept both.
+	// `content` may arrive as a string (typical for chat-style models) or as an
+	// already-parsed object. When it's a string we tolerate three common LLM
+	// quirks even though the prompt forbids them: a JSON document wrapped in
+	// ```json fences, leading/trailing prose, or both.
 	let value: unknown = raw;
 	if (typeof raw === "string") {
-		try {
-			value = JSON.parse(raw);
-		} catch {
-			throw new CodexSchemaViolationError("agent_message content is not valid JSON");
+		value = parseJsonLoose(raw);
+		if (value === undefined) {
+			throw new CodexSchemaViolationError(
+				`agent_message content is not parseable JSON. First 200 chars: ${raw.slice(0, 200)}`,
+			);
 		}
 	}
 	if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -481,6 +427,62 @@ function coerceStructureResult(raw: unknown): StructureResult {
 			? (obj.wiki_slugs_used as string[])
 			: undefined,
 	};
+}
+
+// Best-effort JSON extraction from possibly-noisy model output:
+// 1) parse the raw string,
+// 2) strip a ```json ... ``` fence if present,
+// 3) extract the first balanced {...} block.
+// Returns undefined if all paths fail.
+function parseJsonLoose(raw: string): unknown {
+	const trimmed = raw.trim();
+	try {
+		return JSON.parse(trimmed);
+	} catch {
+		// fall through
+	}
+	const fence = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+	if (fence?.[1]) {
+		try {
+			return JSON.parse(fence[1].trim());
+		} catch {
+			// fall through
+		}
+	}
+	const firstBrace = trimmed.indexOf("{");
+	if (firstBrace >= 0) {
+		let depth = 0;
+		let inStr = false;
+		let escape = false;
+		for (let i = firstBrace; i < trimmed.length; i++) {
+			const ch = trimmed[i];
+			if (escape) {
+				escape = false;
+				continue;
+			}
+			if (ch === "\\") {
+				escape = true;
+				continue;
+			}
+			if (ch === '"') {
+				inStr = !inStr;
+				continue;
+			}
+			if (inStr) continue;
+			if (ch === "{") depth++;
+			else if (ch === "}") {
+				depth--;
+				if (depth === 0) {
+					try {
+						return JSON.parse(trimmed.slice(firstBrace, i + 1));
+					} catch {
+						return undefined;
+					}
+				}
+			}
+		}
+	}
+	return undefined;
 }
 
 async function* readLines(stream: Readable): AsyncGenerator<string> {

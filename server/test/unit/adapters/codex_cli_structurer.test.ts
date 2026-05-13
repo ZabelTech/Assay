@@ -134,6 +134,45 @@ describe("#18 CodexCliStructurer", () => {
 			expect(result.conflicts).toEqual([]);
 		});
 
+		it("tolerates ```json fences around the JSON document (common LLM quirk)", async () => {
+			// WHY: our prompt forbids fences but models sometimes emit them anyway.
+			// Without tolerance the import would 400 on a perfectly-good response.
+			recorder.queueEvents([
+				{
+					type: "agent_message",
+					content:
+						"```json\n" +
+						JSON.stringify({
+							drafts: [{ type: "skill", value: { name: "Go" }, origin: [{ path: "x.md", version: 1 }] }],
+							conflicts: [],
+						}) +
+						"\n```",
+				},
+			]);
+			const corpus = new FakeCorpus([corpusFile("x.md", "paste", "x")]);
+			const result = await makeStructurer(recorder.spawner).structure({ corpus, wiki, web });
+			expect(result.drafts.length).toBe(1);
+		});
+
+		it("extracts JSON from response with leading/trailing prose", async () => {
+			// WHY: same robustness concern; the prompt forbids prose but models drift.
+			recorder.queueEvents([
+				{
+					type: "agent_message",
+					content:
+						"Here is the structured output you requested:\n\n" +
+						JSON.stringify({
+							drafts: [{ type: "skill", value: { name: "Rust" }, origin: [{ path: "x.md", version: 1 }] }],
+							conflicts: [],
+						}) +
+						"\n\nLet me know if you need anything else.",
+				},
+			]);
+			const corpus = new FakeCorpus([corpusFile("x.md", "paste", "x")]);
+			const result = await makeStructurer(recorder.spawner).structure({ corpus, wiki, web });
+			expect((result.drafts[0]!.value as { name: string }).name).toBe("Rust");
+		});
+
 		it("accepts agent_message content as a parsed object (not only string)", async () => {
 			// WHY: chat-style models under --output-schema may return either a JSON
 			// string or an already-parsed object. Accept both.
@@ -193,20 +232,28 @@ describe("#18 CodexCliStructurer", () => {
 			expect(stdin).toContain("BODY B");
 		});
 
-		it("argv contains --output-schema pointing at a readable JSON Schema file", async () => {
+		it("does NOT pass --output-schema (steers via prompt instead)", async () => {
+			// WHY: OpenAI's structured-outputs mode rejects free-form `object`
+			// fields, and DraftInput.value is per-Cairn-type — can't be
+			// enumerated without an unworkable mega-schema. We document the
+			// shape inline in the system prompt instead.
 			recorder.queueEvents([{ type: "agent_message", content: { drafts: [], conflicts: [] } }]);
 			const corpus = new FakeCorpus([corpusFile("x.md", "paste", "x")]);
 			await makeStructurer(recorder.spawner).structure({ corpus, wiki, web });
+			expect(recorder.calls[0]!.args).not.toContain("--output-schema");
+		});
 
-			const args = recorder.calls[0]!.args;
-			const idx = args.indexOf("--output-schema");
-			expect(idx).toBeGreaterThanOrEqual(0);
-			const schemaPath = args[idx + 1]!;
-			// The temp dir gets cleaned up after structure() returns; we just
-			// verify the flag is present and the next arg looks like a path,
-			// not the literal `{schema}` placeholder bug from prior issue
-			// rendering. (The schema content itself is exercised in the next test.)
-			expect(schemaPath).toMatch(/[\\/]schema\.json$/);
+		it("system preamble carries the StructureResult JSON shape inline", async () => {
+			// WHY: since we don't use --output-schema, the model needs the
+			// shape via prompt. Drift between this string and pipeline/types.ts
+			// silently degrades output quality — pin both ends.
+			recorder.queueEvents([{ type: "agent_message", content: { drafts: [], conflicts: [] } }]);
+			const corpus = new FakeCorpus([corpusFile("x.md", "paste", "x")]);
+			await makeStructurer(recorder.spawner).structure({ corpus, wiki, web });
+			const stdin = recorder.calls[0]!.stdinChunks.join("");
+			expect(stdin).toContain('"drafts"');
+			expect(stdin).toContain('"conflicts"');
+			expect(stdin).toContain('"origin"');
 		});
 
 		it("argv always includes --json and --skip-git-repo-check", async () => {
