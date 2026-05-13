@@ -233,6 +233,13 @@ const narrativeValueZ = z.object({
 	scope: z.string().optional(),
 });
 
+// Exported as part of #15: ImportPipeline.validateOrFallback() uses this to
+// per-type-validate drafts before persisting and to fall back to a
+// `narrative` wrapper when the value text doesn't fit a structured type.
+export function getValueValidator(type: string): z.ZodTypeAny | undefined {
+	return KNOWN_TYPE_VALUE[type];
+}
+
 const KNOWN_TYPE_VALUE: Record<string, z.ZodTypeAny> = {
 	identity: identityValueZ,
 	employment: employmentValueZ,

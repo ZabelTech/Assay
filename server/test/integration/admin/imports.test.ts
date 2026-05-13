@@ -134,8 +134,19 @@ describe("#7 admin imports", () => {
 
 	describe("pdf import", () => {
 		it("extracts text via PdfParser, drafts via Structurer", async () => {
+			// #15: per-type validators now run at draft persist time; an
+			// employment value missing required fields would fall back to a
+			// narrative wrapper. Fixture must satisfy employmentValueZ.
 			server.structurer.register("pdf", [
-				{ type: "employment", value: { employer: "Stripe", title: "Senior Engineer" } },
+				{
+					type: "employment",
+					value: {
+						employer: "Stripe",
+						title: "Senior Engineer",
+						start_date: "2022-01-01",
+						status: "current",
+					},
+				},
 			]);
 			const pdfBytes = Buffer.from("résumé text content");
 			const res = await server.adminFetch("/admin/api/import/pdf", {

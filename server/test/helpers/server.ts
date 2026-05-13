@@ -18,6 +18,15 @@ import { MemoryEvidenceStore } from "../../src/adapters/evidence_store.js";
 import { MockOAuthProvider, type OAuthProvider } from "../../src/adapters/oauth.js";
 import { MockPdfParser } from "../../src/adapters/pdf_parser.js";
 import { MockStructurer } from "../../src/adapters/structurer.js";
+import { MockWebSearch } from "../../src/adapters/web_search.js";
+import { PassThroughVerifier, type Verifier } from "../../src/adapters/verifier.js";
+import {
+	GithubNormalizer,
+	LinkedinNormalizer,
+	PasteNormalizer,
+	PdfNormalizer,
+	type SourceNormalizerRegistry,
+} from "../../src/adapters/source_normalizer.js";
 import { ClaimDraftsRepo } from "../../src/storage/claim_drafts.repo.js";
 import { openDatabase } from "../../src/storage/db.js";
 import { AdminTokensRepo } from "../../src/storage/admin_tokens.repo.js";
@@ -27,6 +36,12 @@ import { AuditRepo } from "../../src/storage/audit.repo.js";
 import { HandlesRepo } from "../../src/storage/handles.repo.js";
 import { SubjectRepo } from "../../src/storage/subject.repo.js";
 import { PendingWikiProposalsRepo } from "../../src/storage/pending_wiki_proposals.repo.js";
+import { ConflictsRepo } from "../../src/storage/conflicts.repo.js";
+import { CorpusMetadataRepo } from "../../src/storage/corpus_metadata.repo.js";
+import { WikiPageUsesRepo } from "../../src/storage/wiki_page_uses.repo.js";
+import { CorpusStore } from "../../src/corpus/store.js";
+import { ImportPipeline } from "../../src/pipeline/import_pipeline.js";
+import { EmptyWikiReader, type WikiReader } from "../../src/wiki/reader.js";
 import { WikiRepo } from "../../src/wiki/repo.js";
 
 export type TokenForm = "header" | "query" | "path";
@@ -38,6 +53,15 @@ export interface BuildTestServerOpts {
 	operatorUrl?: string;
 	operatorType?: "hosted" | "self_hosted" | "experimental";
 	rateLimit?: { window_ms: number; max: number };
+	// Defaults to PassThroughVerifier so existing #7 tests (which register
+	// fixture values that aren't substrings of the raw input) don't trip the
+	// #15 SubstringVerifier. New PR C tests that exercise verification
+	// semantics override this with `SubstringVerifier`.
+	verifier?: Verifier;
+	// Defaults to EmptyWikiReader. PR C tests that need the structurer to
+	// see real wiki pages substitute `FsWikiReader.load(projectWiki)` or a
+	// stub.
+	wikiReader?: WikiReader;
 }
 
 export interface TestServer {
@@ -51,11 +75,18 @@ export interface TestServer {
 	adminTokens: AdminTokensRepo;
 	drafts: ClaimDraftsRepo;
 	structurer: MockStructurer;
+	web: MockWebSearch;
 	oauthProviders: Map<string, OAuthProvider>;
 	pdfParser: MockPdfParser;
 	wikiProposals: PendingWikiProposalsRepo;
 	wikiRepo: WikiRepo;
 	wikiRepoDir: string;
+	conflicts: ConflictsRepo;
+	corpusMetadata: CorpusMetadataRepo;
+	corpusStore: CorpusStore;
+	corpusDir: string;
+	pipeline: ImportPipeline;
+	evidenceStore: MemoryEvidenceStore;
 	adminToken: string;
 	issueToken(opts?: {
 		expires_at?: string;
@@ -100,6 +131,36 @@ export async function buildTestServer(opts: BuildTestServerOpts = {}): Promise<T
 	const mailer = new CaptureMailer();
 	const synthesizer = new StubSynthesizer();
 	const wikiProposals = new PendingWikiProposalsRepo(db);
+	const conflictsRepo = new ConflictsRepo(db);
+	const corpusMetadata = new CorpusMetadataRepo(db);
+	const wikiPageUses = new WikiPageUsesRepo(db);
+	const corpusDir = mkdtempSync(join(tmpdir(), "assay-corpus-"));
+	const corpusStore = new CorpusStore(corpusDir);
+	const web = new MockWebSearch();
+	const verifier = opts.verifier ?? new PassThroughVerifier();
+	const wikiReader = opts.wikiReader ?? new EmptyWikiReader();
+	const normalizers: SourceNormalizerRegistry = {
+		paste: new PasteNormalizer(),
+		pdf: new PdfNormalizer(pdfParser),
+		linkedin: new LinkedinNormalizer(),
+		github: new GithubNormalizer(),
+	};
+	const pipeline = new ImportPipeline({
+		db,
+		corpusStore,
+		corpusMetadata,
+		evidenceStore,
+		claims,
+		drafts,
+		conflicts: conflictsRepo,
+		wikiProposals,
+		wikiPageUses,
+		wikiReader,
+		web,
+		normalizers,
+		structurer,
+		verifier,
+	});
 	// Each test gets an isolated tmpdir for the wiki repo. Cleanup happens in
 	// close(). Tests that actually exercise promote() must call
 	// `await ts.wikiRepo.initIfMissing()` first; the constructor is cheap so
@@ -152,6 +213,8 @@ export async function buildTestServer(opts: BuildTestServerOpts = {}): Promise<T
 		pdfParser,
 		wikiProposals,
 		wikiRepo,
+		conflicts: conflictsRepo,
+		pipeline,
 		rateLimit: opts.rateLimit ?? { window_ms: 60_000, max: 60 },
 		corsOrigins: ["*"],
 	});
@@ -179,11 +242,18 @@ export async function buildTestServer(opts: BuildTestServerOpts = {}): Promise<T
 		adminTokens,
 		drafts,
 		structurer,
+		web,
 		oauthProviders,
 		pdfParser,
 		wikiProposals,
 		wikiRepo,
 		wikiRepoDir,
+		conflicts: conflictsRepo,
+		corpusMetadata,
+		corpusStore,
+		corpusDir,
+		pipeline,
+		evidenceStore,
 		adminToken,
 		issueToken(o = {}) {
 			return tokens.issue({
@@ -246,6 +316,7 @@ export async function buildTestServer(opts: BuildTestServerOpts = {}): Promise<T
 		close() {
 			db.close();
 			rmSync(wikiRepoDir, { recursive: true, force: true });
+			rmSync(corpusDir, { recursive: true, force: true });
 		},
 	};
 }

@@ -1,32 +1,34 @@
-// #7 Phase 9 — admin draft store + four import paths (paste / PDF / LinkedIn / GitHub OAuth).
-// All four produce `self_attested` draft claims for review-before-publish. Publish moves
-// drafts atomically into the `claims` table under the current subject.
+// #7 Phase 9 + #15 — admin import paths. Each handler still produces
+// self_attested drafts for review-before-publish, but the body of work has
+// moved into ImportPipeline.ingest() so the same normalize → corpus →
+// structurer → persist path runs for every source. Publish now goes through
+// ImportPipeline.publish() which resolves each draft's pinned corpus origin,
+// runs the Verifier, and rewrites evidence to point at the raw artifact
+// (#15's hard privacy boundary: corpus markdown is never reachable from the
+// MCP endpoint).
 //
-// Acceptance bullets pinned:
-// - "All four import paths produce `self_attested` draft claims that the candidate edits
-//    before publish"
-// - "LinkedIn and GitHub OAuth providers are mocked in the automated test; real-provider
-//    OAuth is verified out-of-band"
+// Acceptance bullets pinned (unchanged from #7):
+// - "All four import paths produce `self_attested` draft claims that the
+//    candidate edits before publish"
+// - "LinkedIn and GitHub OAuth providers are mocked in the automated test;
+//    real-provider OAuth is verified out-of-band"
 import type { Context, Hono } from "hono";
 import { randomBytes } from "node:crypto";
 import type { AdminTokensRepo } from "../storage/admin_tokens.repo.js";
-import type { ClaimsRepo } from "../storage/claims.repo.js";
 import type { ClaimDraftsRepo } from "../storage/claim_drafts.repo.js";
 import type { SubjectRepo } from "../storage/subject.repo.js";
-import type { Structurer } from "../adapters/structurer.js";
 import type { OAuthProvider } from "../adapters/oauth.js";
-import type { PdfParser } from "../adapters/pdf_parser.js";
 import { CairnError } from "../mcp/errors.js";
+import { ImportPipeline, PipelineError } from "../pipeline/import_pipeline.js";
+import type { Target } from "../pipeline/types.js";
 import { requireAdmin } from "./auth.js";
 
 export interface AdminImportsDeps {
 	adminTokens: AdminTokensRepo;
 	subjects: SubjectRepo;
-	claims: ClaimsRepo;
 	drafts: ClaimDraftsRepo;
-	structurer: Structurer;
+	pipeline: ImportPipeline;
 	oauthProviders: Map<string, OAuthProvider>;
-	pdfParser: PdfParser;
 	defaultSubject: string;
 }
 
@@ -40,8 +42,6 @@ const OAUTH_STATE_TTL_MS = 10 * 60_000; // 10 minutes per the plan.
 export function mountAdminImportsRoutes(app: Hono, deps: AdminImportsDeps): void {
 	const admin = requireAdmin(deps.adminTokens);
 
-	// Per-app OAuth state registry. Random `state` → provider id + timestamp. The map
-	// cleans expired entries opportunistically on each access.
 	const oauthStates = new Map<string, OAuthStateEntry>();
 	const sweep = () => {
 		const now = Date.now();
@@ -49,6 +49,8 @@ export function mountAdminImportsRoutes(app: Hono, deps: AdminImportsDeps): void
 			if (now - v.created_at > OAUTH_STATE_TTL_MS) oauthStates.delete(k);
 		}
 	};
+
+	const currentSubject = () => deps.subjects.getCurrentSubject() ?? deps.defaultSubject;
 
 	// ---------------- Draft store ----------------
 
@@ -83,11 +85,13 @@ export function mountAdminImportsRoutes(app: Hono, deps: AdminImportsDeps): void
 		const body = (await c.req.json().catch(() => ({}))) as { draft_ids?: string[] };
 		const ids = Array.isArray(body.draft_ids) ? body.draft_ids : [];
 		if (ids.length === 0) return malformed(c, "draft_ids required");
-		const subject = deps.subjects.getCurrentSubject() ?? deps.defaultSubject;
 		try {
-			const result = deps.drafts.publish({ draft_ids: ids, subject, claims: deps.claims });
+			const result = await deps.pipeline.publish({ draft_ids: ids, subject: currentSubject() });
 			return c.json(result, 201);
 		} catch (err) {
+			if (err instanceof PipelineError) {
+				return malformed(c, `${err.message}${err.detail ? ` (${err.detail})` : ""}`);
+			}
 			return malformed(c, err instanceof Error ? err.message : String(err));
 		}
 	});
@@ -95,32 +99,42 @@ export function mountAdminImportsRoutes(app: Hono, deps: AdminImportsDeps): void
 	// ---------------- Text paste ----------------
 
 	app.post("/admin/api/import/paste", admin, async (c) => {
-		const body = (await c.req.json().catch(() => ({}))) as { text?: string; source?: string };
+		const body = (await c.req.json().catch(() => ({}))) as { text?: string; target?: Target };
 		if (typeof body.text !== "string" || body.text.length === 0) {
 			return malformed(c, "text required");
 		}
-		const drafts = await deps.structurer.structure({
-			raw: body.text,
-			source: body.source ?? "paste",
-		});
-		const created = drafts.map((d) =>
-			deps.drafts.create({ source: "paste", type: d.type, value: d.value, visibility: d.visibility }),
-		);
-		return c.json({ drafts: created }, 201);
+		try {
+			const result = await deps.pipeline.ingest({
+				raw: body.text,
+				source_type: "paste",
+				subject: currentSubject(),
+				target: body.target,
+				rawMediaType: "text/plain",
+			});
+			return c.json({ drafts: result.drafts }, 201);
+		} catch (err) {
+			return malformed(c, err instanceof Error ? err.message : String(err));
+		}
 	});
 
-	// ---------------- PDF upload (base64 in JSON body for v0 simplicity) ----------------
+	// ---------------- PDF upload ----------------
 
 	app.post("/admin/api/import/pdf", admin, async (c) => {
-		const body = (await c.req.json().catch(() => ({}))) as { data_base64?: string };
+		const body = (await c.req.json().catch(() => ({}))) as { data_base64?: string; target?: Target };
 		if (typeof body.data_base64 !== "string") return malformed(c, "data_base64 required");
 		const buffer = Buffer.from(body.data_base64, "base64");
-		const text = await deps.pdfParser.extractText(buffer);
-		const drafts = await deps.structurer.structure({ raw: text, source: "pdf" });
-		const created = drafts.map((d) =>
-			deps.drafts.create({ source: "pdf", type: d.type, value: d.value, visibility: d.visibility }),
-		);
-		return c.json({ drafts: created }, 201);
+		try {
+			const result = await deps.pipeline.ingest({
+				raw: buffer,
+				source_type: "pdf",
+				subject: currentSubject(),
+				target: body.target,
+				rawMediaType: "application/pdf",
+			});
+			return c.json({ drafts: result.drafts }, 201);
+		} catch (err) {
+			return malformed(c, err instanceof Error ? err.message : String(err));
+		}
 	});
 
 	// ---------------- OAuth (LinkedIn / GitHub) ----------------
@@ -152,11 +166,17 @@ export function mountAdminImportsRoutes(app: Hono, deps: AdminImportsDeps): void
 
 		const { access_token } = await provider.exchangeCode(code);
 		const profile = await provider.fetchProfile(access_token);
-		const drafts = await deps.structurer.structure({ raw: profile.raw, source: providerId });
-		const created = drafts.map((d) =>
-			deps.drafts.create({ source: providerId, type: d.type, value: d.value, visibility: d.visibility }),
-		);
-		return c.json({ drafts: created }, 201);
+		try {
+			const result = await deps.pipeline.ingest({
+				raw: profile.raw,
+				source_type: providerId,
+				subject: currentSubject(),
+				rawMediaType: "application/json",
+			});
+			return c.json({ drafts: result.drafts }, 201);
+		} catch (err) {
+			return malformed(c, err instanceof Error ? err.message : String(err));
+		}
 	});
 }
 

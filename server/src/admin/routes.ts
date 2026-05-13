@@ -13,10 +13,10 @@ import type { TokensRepo } from "../storage/tokens.repo.js";
 import type { Mailer } from "../adapters/mailer.js";
 import type { EvidenceStore } from "../adapters/evidence_store.js";
 import type { OAuthProvider } from "../adapters/oauth.js";
-import type { PdfParser } from "../adapters/pdf_parser.js";
-import type { Structurer } from "../adapters/structurer.js";
 import type { PendingWikiProposalsRepo } from "../storage/pending_wiki_proposals.repo.js";
+import type { ConflictsRepo } from "../storage/conflicts.repo.js";
 import type { WikiRepo } from "../wiki/repo.js";
+import type { ImportPipeline } from "../pipeline/import_pipeline.js";
 import { requireAdmin } from "./auth.js";
 import { mountAdminAuditRoutes } from "./audit.js";
 import { mountAdminClaimRoutes } from "./claims.js";
@@ -27,6 +27,7 @@ import { mountAdminImportsRoutes } from "./imports.js";
 import { mountAdminSubjectRoutes } from "./subject.js";
 import { mountAdminTokenRoutes } from "./tokens.js";
 import { mountAdminWikiProposalsRoutes } from "./wiki_proposals.js";
+import { mountAdminConflictsRoutes } from "./conflicts.js";
 
 export interface AdminRouteDeps {
 	subject: string;
@@ -42,11 +43,11 @@ export interface AdminRouteDeps {
 	drafts: ClaimDraftsRepo;
 	mailer: Mailer;
 	evidenceStore: EvidenceStore;
-	structurer: Structurer;
+	pipeline: ImportPipeline;
 	oauthProviders: Map<string, OAuthProvider>;
-	pdfParser: PdfParser;
 	wikiProposals: PendingWikiProposalsRepo;
 	wikiRepo: WikiRepo;
+	conflicts: ConflictsRepo;
 }
 
 export function mountAdminRoutes(app: Hono, deps: AdminRouteDeps): void {
@@ -114,11 +115,9 @@ export function mountAdminRoutes(app: Hono, deps: AdminRouteDeps): void {
 	mountAdminImportsRoutes(app, {
 		adminTokens: deps.adminTokens,
 		subjects: deps.subjects,
-		claims: deps.claims,
 		drafts: deps.drafts,
-		structurer: deps.structurer,
+		pipeline: deps.pipeline,
 		oauthProviders: deps.oauthProviders,
-		pdfParser: deps.pdfParser,
 		defaultSubject: deps.subject,
 	});
 
@@ -126,5 +125,14 @@ export function mountAdminRoutes(app: Hono, deps: AdminRouteDeps): void {
 		adminTokens: deps.adminTokens,
 		proposals: deps.wikiProposals,
 		wikiRepo: deps.wikiRepo,
+	});
+
+	mountAdminConflictsRoutes(app, {
+		adminTokens: deps.adminTokens,
+		conflicts: deps.conflicts,
+		subjects: deps.subjects,
+		claims: deps.claims,
+		drafts: deps.drafts,
+		defaultSubject: deps.subject,
 	});
 }

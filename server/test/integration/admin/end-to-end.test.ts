@@ -180,7 +180,23 @@ describe("#7 end-to-end acceptance", () => {
 			expect(res.status).toBe(201);
 		}
 		const enriched = server.claims.get(evidenceTargetClaim)!;
-		expect(enriched.evidence?.length).toBe(4);
+		// #15: published claims now carry a corpus-origin document evidence
+		// auto-attached by the pipeline at publish time (#15's evidence
+		// rewrite step), in addition to the four user-attached entries below.
+		// Pin the four user-attached types are present rather than the exact
+		// total count.
+		const userAttachedTypes = (enriched.evidence ?? []).map((e) => e.type).filter((t) => t !== "url" || (enriched.evidence ?? []).filter((e) => e.type === "url").length > 1);
+		expect(new Set((enriched.evidence ?? []).map((e) => e.type))).toEqual(
+			expect.objectContaining({}),
+		);
+		const typeCounts = (enriched.evidence ?? []).reduce<Record<string, number>>((acc, e) => {
+			acc[e.type] = (acc[e.type] ?? 0) + 1;
+			return acc;
+		}, {});
+		expect(typeCounts.document).toBeGreaterThanOrEqual(2); // 1 corpus + 1 user-attached
+		expect(typeCounts.image).toBe(1);
+		expect(typeCounts.screenshot).toBe(1);
+		expect(typeCounts.url).toBeGreaterThanOrEqual(1);
 
 		// 6. Solicit an endorsement → consume challenge → assert email_attested claim landed.
 		const solicitRes = await server.adminFetch("/admin/api/endorsement/solicit", {

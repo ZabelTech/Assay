@@ -8,6 +8,15 @@ import { LocalEvidenceStore } from "./adapters/evidence_store.js";
 import { MockOAuthProvider } from "./adapters/oauth.js";
 import { MockPdfParser } from "./adapters/pdf_parser.js";
 import { MockStructurer } from "./adapters/structurer.js";
+import { MockWebSearch } from "./adapters/web_search.js";
+import { selectVerifier } from "./adapters/verifier.js";
+import {
+	GithubNormalizer,
+	LinkedinNormalizer,
+	PasteNormalizer,
+	PdfNormalizer,
+	type SourceNormalizerRegistry,
+} from "./adapters/source_normalizer.js";
 import { StubSynthesizer } from "./adapters/synthesizer.js";
 import { ClaimDraftsRepo } from "./storage/claim_drafts.repo.js";
 import { openDatabase } from "./storage/db.js";
@@ -18,6 +27,12 @@ import { AuditRepo } from "./storage/audit.repo.js";
 import { HandlesRepo } from "./storage/handles.repo.js";
 import { SubjectRepo } from "./storage/subject.repo.js";
 import { PendingWikiProposalsRepo } from "./storage/pending_wiki_proposals.repo.js";
+import { CorpusMetadataRepo } from "./storage/corpus_metadata.repo.js";
+import { ConflictsRepo } from "./storage/conflicts.repo.js";
+import { WikiPageUsesRepo } from "./storage/wiki_page_uses.repo.js";
+import { CorpusStore } from "./corpus/store.js";
+import { ImportPipeline } from "./pipeline/import_pipeline.js";
+import { FsWikiReader, EmptyWikiReader, type WikiReader } from "./wiki/reader.js";
 import { WikiRepo } from "./wiki/repo.js";
 import { buildApp } from "./mcp/transport.js";
 
@@ -55,23 +70,71 @@ const wikiRepo = new WikiRepo({
 });
 await wikiRepo.initIfMissing();
 
+// #15 / #16 wiki reader — loads pages from the local wiki repo (seeded from
+// the bundled wiki/ on first boot via WikiRepo.initIfMissing).
+let wikiReader: WikiReader;
+try {
+	wikiReader = await FsWikiReader.load(cfg.wikiRepoDir);
+} catch {
+	wikiReader = new EmptyWikiReader();
+}
+
+const claims = new ClaimsRepo(db);
+const drafts = new ClaimDraftsRepo(db);
+const conflictsRepo = new ConflictsRepo(db);
+const wikiProposals = new PendingWikiProposalsRepo(db);
+const wikiPageUses = new WikiPageUsesRepo(db);
+const corpusMetadata = new CorpusMetadataRepo(db);
+const corpusStore = new CorpusStore(cfg.corpusDir);
+const evidenceStore = new LocalEvidenceStore(cfg.evidenceDir);
+const pdfParser = new MockPdfParser();
+const structurer = new MockStructurer();
+const web = new MockWebSearch();
+const verifier = selectVerifier(process.env);
+
+const normalizers: SourceNormalizerRegistry = {
+	paste: new PasteNormalizer(),
+	pdf: new PdfNormalizer(pdfParser),
+	linkedin: new LinkedinNormalizer(),
+	github: new GithubNormalizer(),
+};
+
+const pipeline = new ImportPipeline({
+	db,
+	corpusStore,
+	corpusMetadata,
+	evidenceStore,
+	claims,
+	drafts,
+	conflicts: conflictsRepo,
+	wikiProposals,
+	wikiPageUses,
+	wikiReader,
+	web,
+	normalizers,
+	structurer,
+	verifier,
+});
+
 const app = buildApp({
 	subject: cfg.subject,
 	operatorUrl: cfg.operatorUrl,
 	operatorType: cfg.operatorType,
 	db,
-	claims: new ClaimsRepo(db),
+	claims,
 	tokens: new TokensRepo(db),
 	audit: new AuditRepo(db),
 	subjects: new SubjectRepo(db),
 	adminTokens: new AdminTokensRepo(db),
 	handles: new HandlesRepo(db),
-	drafts: new ClaimDraftsRepo(db),
-	evidenceStore: new LocalEvidenceStore(cfg.evidenceDir),
-	wikiProposals: new PendingWikiProposalsRepo(db),
+	drafts,
+	evidenceStore,
+	wikiProposals,
 	wikiRepo,
-	structurer: new MockStructurer(),
-	pdfParser: new MockPdfParser(),
+	conflicts: conflictsRepo,
+	pipeline,
+	structurer,
+	pdfParser,
 	oauthProviders: new Map([
 		["linkedin", new MockOAuthProvider("linkedin")],
 		["github", new MockOAuthProvider("github")],

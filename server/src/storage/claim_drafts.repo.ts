@@ -4,6 +4,7 @@
 import type { Database } from "better-sqlite3";
 import { randomBytes } from "node:crypto";
 import type { Claim, Visibility } from "../domain/types.js";
+import type { CorpusOrigin } from "../pipeline/types.js";
 import type { ClaimsRepo } from "./claims.repo.js";
 
 export interface ClaimDraft {
@@ -12,6 +13,11 @@ export interface ClaimDraft {
 	type: string;
 	value: Record<string, unknown>;
 	visibility: Visibility;
+	// #15 origin pointers — corpus files (with pinned version) the draft was
+	// extracted from. The pipeline always sets this; #7's pre-pipeline call
+	// sites (which the pipeline now subsumes) didn't, hence the optional
+	// shape for back-compat in test fixtures that bypass create().
+	origin?: CorpusOrigin[];
 	created_at: string;
 	updated_at: string;
 }
@@ -19,7 +25,13 @@ export interface ClaimDraft {
 export class ClaimDraftsRepo {
 	constructor(private db: Database) {}
 
-	create(opts: { source: string; type: string; value: Record<string, unknown>; visibility?: Visibility }): ClaimDraft {
+	create(opts: {
+		source: string;
+		type: string;
+		value: Record<string, unknown>;
+		visibility?: Visibility;
+		origin?: CorpusOrigin[];
+	}): ClaimDraft {
 		const now = new Date().toISOString();
 		const draft: ClaimDraft = {
 			draft_id: `draft_${randomBytes(8).toString("hex")}`,
@@ -27,6 +39,7 @@ export class ClaimDraftsRepo {
 			type: opts.type,
 			value: opts.value,
 			visibility: opts.visibility ?? (opts.type === "compensation" ? "private" : "permissioned"),
+			origin: opts.origin ?? [],
 			created_at: now,
 			updated_at: now,
 		};

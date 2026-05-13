@@ -20,6 +20,7 @@ export interface Config {
 	evidenceDir: string;
 	wikiRepoDir: string;
 	wikiSeedDir: string;
+	corpusDir: string;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -46,5 +47,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 		evidenceDir: env.EVIDENCE_DIR ?? "/data/evidence",
 		wikiRepoDir: env.WIKI_REPO_DIR ?? "/data/wiki-repo",
 		wikiSeedDir: env.WIKI_SEED_DIR ?? "/app/wiki",
+		corpusDir: env.CORPUS_DIR ?? "/data/candidate-corpus",
 	};
 }
