@@ -17,7 +17,8 @@
     "dev": "tsx watch server/src/index.ts",
     "start": "node server/dist/index.js",
     "cli": "tsx server/src/cli/index.ts",
-    "check:skips": "if grep -rE 'it\\.skip|describe\\.skip|test\\.skip' server/test; then echo 'Skipped tests found — see rule 11'; exit 1; else echo 'No skipped tests.'; fi"
+    "check:skips": "if grep -rE 'it\\.skip|describe\\.skip|test\\.skip' server/test; then echo 'Skipped tests found — see rule 11'; exit 1; else echo 'No skipped tests.'; fi",
+    "wiki:check": "node tools/wiki-check/index.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.4",
@@ -30,8 +31,10 @@
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
     "@types/better-sqlite3": "^7.6.11",
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.9.0",
     "@types/nodemailer": "^6.4.16",
+    "js-yaml": "^4.1.0",
     "tsx": "^4.19.2",
     "typescript": "^5.6.3",
     "vitest": "^2.1.5"
