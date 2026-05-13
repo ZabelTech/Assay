@@ -218,6 +218,33 @@ describe("#18 CodexCliStructurer", () => {
 			expect(recorder.calls[0]!.args).toContain("--skip-git-repo-check");
 		});
 
+		it("argv pins --model gpt-5.5 by default; constructor model option overrides", async () => {
+			// WHY: relying on codex's implicit default ties us to whatever ships
+			// most-recent. Pinning makes runs reproducible and avoids the
+			// no-default-model failure mode seen in early smoke testing.
+			recorder.queueEvents([{ type: "agent_message", content: { drafts: [], conflicts: [] } }]);
+			const corpus = new FakeCorpus([corpusFile("x.md", "paste", "x")]);
+			await makeStructurer(recorder.spawner).structure({ corpus, wiki, web });
+			const defaultArgs = recorder.calls[0]!.args;
+			const i = defaultArgs.indexOf("--model");
+			expect(i).toBeGreaterThanOrEqual(0);
+			expect(defaultArgs[i + 1]).toBe("gpt-5.5");
+
+			// Override path.
+			const overrideRecorder = new SpawnerRecorder();
+			overrideRecorder.queueEvents([
+				{ type: "agent_message", content: { drafts: [], conflicts: [] } },
+			]);
+			await new CodexCliStructurer({
+				spawner: overrideRecorder.spawner,
+				skipBinaryCheck: true,
+				model: "gpt-5.4",
+			}).structure({ corpus, wiki, web });
+			const overrideArgs = overrideRecorder.calls[0]!.args;
+			const j = overrideArgs.indexOf("--model");
+			expect(overrideArgs[j + 1]).toBe("gpt-5.4");
+		});
+
 		it("restricts the prompt to new_origins when supplied", async () => {
 			// WHY: the pipeline always passes new_origins so a re-import doesn't
 			// re-extract from the entire corpus, only the fresh files.

@@ -108,12 +108,16 @@ export interface CodexCliStructurerOptions {
 
 export class CodexCliStructurer implements Structurer {
 	private readonly codexBinary: string;
-	private readonly model: string | undefined;
+	private readonly model: string;
 	private readonly spawner: Spawner;
 
 	constructor(opts: CodexCliStructurerOptions = {}) {
 		this.codexBinary = opts.codexBinary ?? "codex";
-		this.model = opts.model;
+		// Default to OpenAI's currently-recommended Codex model. As of May 2026
+		// gpt-5.5 is the top tier; gpt-5.4 is the fallback if your subscription
+		// doesn't yet have 5.5 in the model picker. Override with CODEX_MODEL
+		// (handled in selectStructurer) or the `model` constructor option.
+		this.model = opts.model ?? "gpt-5.5";
 		this.spawner = opts.spawner ?? defaultSpawner;
 
 		if (!opts.skipBinaryCheck && !opts.spawner) {
@@ -151,7 +155,8 @@ export class CodexCliStructurer implements Structurer {
 				"--skip-git-repo-check",
 				"--output-schema",
 				schemaPath,
-				...(this.model ? ["--model", this.model] : []),
+				"--model",
+				this.model,
 			];
 			const proc = this.spawner(this.codexBinary, argv);
 
