@@ -2,40 +2,40 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
-import { loadConfig } from "./config.js";
-import { CaptureMailer, SmtpMailer } from "./adapters/mailer.js";
 import { LocalEvidenceStore } from "./adapters/evidence_store.js";
+import { CaptureMailer, SmtpMailer } from "./adapters/mailer.js";
 import { MockOAuthProvider } from "./adapters/oauth.js";
 import { MockPdfParser } from "./adapters/pdf_parser.js";
-import { MockStructurer } from "./adapters/structurer.js";
-import { MockWebSearch } from "./adapters/web_search.js";
-import { selectVerifier } from "./adapters/verifier.js";
 import {
 	GithubNormalizer,
 	LinkedinNormalizer,
 	PasteNormalizer,
 	PdfNormalizer,
-	UrlSnapshotNormalizer,
 	type SourceNormalizerRegistry,
+	UrlSnapshotNormalizer,
 } from "./adapters/source_normalizer.js";
+import { selectStructurer } from "./adapters/structurer.js";
 import { StubSynthesizer } from "./adapters/synthesizer.js";
-import { ClaimDraftsRepo } from "./storage/claim_drafts.repo.js";
-import { openDatabase } from "./storage/db.js";
-import { AdminTokensRepo } from "./storage/admin_tokens.repo.js";
-import { ClaimsRepo } from "./storage/claims.repo.js";
-import { TokensRepo } from "./storage/tokens.repo.js";
-import { AuditRepo } from "./storage/audit.repo.js";
-import { HandlesRepo } from "./storage/handles.repo.js";
-import { SubjectRepo } from "./storage/subject.repo.js";
-import { PendingWikiProposalsRepo } from "./storage/pending_wiki_proposals.repo.js";
-import { CorpusMetadataRepo } from "./storage/corpus_metadata.repo.js";
-import { ConflictsRepo } from "./storage/conflicts.repo.js";
-import { WikiPageUsesRepo } from "./storage/wiki_page_uses.repo.js";
+import { selectVerifier } from "./adapters/verifier.js";
+import { MockWebSearch } from "./adapters/web_search.js";
+import { loadConfig } from "./config.js";
 import { CorpusStore } from "./corpus/store.js";
-import { ImportPipeline } from "./pipeline/import_pipeline.js";
-import { FsWikiReader, EmptyWikiReader, type WikiReader } from "./wiki/reader.js";
-import { WikiRepo } from "./wiki/repo.js";
 import { buildApp } from "./mcp/transport.js";
+import { ImportPipeline } from "./pipeline/import_pipeline.js";
+import { AdminTokensRepo } from "./storage/admin_tokens.repo.js";
+import { AuditRepo } from "./storage/audit.repo.js";
+import { ClaimDraftsRepo } from "./storage/claim_drafts.repo.js";
+import { ClaimsRepo } from "./storage/claims.repo.js";
+import { ConflictsRepo } from "./storage/conflicts.repo.js";
+import { CorpusMetadataRepo } from "./storage/corpus_metadata.repo.js";
+import { openDatabase } from "./storage/db.js";
+import { HandlesRepo } from "./storage/handles.repo.js";
+import { PendingWikiProposalsRepo } from "./storage/pending_wiki_proposals.repo.js";
+import { SubjectRepo } from "./storage/subject.repo.js";
+import { TokensRepo } from "./storage/tokens.repo.js";
+import { WikiPageUsesRepo } from "./storage/wiki_page_uses.repo.js";
+import { EmptyWikiReader, FsWikiReader, type WikiReader } from "./wiki/reader.js";
+import { WikiRepo } from "./wiki/repo.js";
 
 const cfg = loadConfig();
 
@@ -89,7 +89,7 @@ const corpusMetadata = new CorpusMetadataRepo(db);
 const corpusStore = new CorpusStore(cfg.corpusDir);
 const evidenceStore = new LocalEvidenceStore(cfg.evidenceDir);
 const pdfParser = new MockPdfParser();
-const structurer = new MockStructurer();
+const structurer = selectStructurer(process.env);
 const web = new MockWebSearch();
 const verifier = selectVerifier(process.env);
 

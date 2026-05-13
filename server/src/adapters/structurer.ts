@@ -1,3 +1,13 @@
+import type { Visibility } from "../domain/types.js";
+import type {
+	CorpusListEntry,
+	CorpusOrigin,
+	CorpusReader,
+	DraftInput,
+	StructureResult,
+	Target,
+	WikiProposalDraft,
+} from "../pipeline/types.js";
 // #15 structurer adapter. The interface here is the pluggability point a
 // concrete LLM-backed structurer plugs into; the rest of the pipeline is
 // LLM-free. Per #15's BYO model, no concrete LLM impl ships in this PR — the
@@ -10,17 +20,8 @@
 // pending wiki proposals. Call sites in admin/imports.ts now go through
 // ImportPipeline.ingest(); they no longer call the structurer directly.
 import type { WikiReader } from "../wiki/reader.js";
+import { CodexCliStructurer } from "./codex_cli_structurer.js";
 import type { WebSearch } from "./web_search.js";
-import type {
-	CorpusListEntry,
-	CorpusOrigin,
-	CorpusReader,
-	DraftInput,
-	StructureResult,
-	Target,
-	WikiProposalDraft,
-} from "../pipeline/types.js";
-import type { Visibility } from "../domain/types.js";
 
 export interface Structurer {
 	structure(input: {
@@ -109,8 +110,9 @@ export class MockStructurer implements Structurer {
 		// every file in the corpus — handy for cross-source structurer-only
 		// unit tests).
 		const newSet = new Set(
-			(input.new_origins ?? entries.map((e) => ({ path: e.path, version: e.version })))
-				.map((o) => `${o.path}::${o.version}`),
+			(input.new_origins ?? entries.map((e) => ({ path: e.path, version: e.version }))).map(
+				(o) => `${o.path}::${o.version}`,
+			),
 		);
 
 		const seenSourceTypes = new Set<string>();
@@ -149,7 +151,8 @@ export class MockStructurer implements Structurer {
 			}
 			// Steering exposure: surface target.role into the draft value so
 			// tests can assert different targets produce different output.
-			const targetTag = this.exposeTarget && input.target?.role ? { _target_role: input.target.role } : {};
+			const targetTag =
+				this.exposeTarget && input.target?.role ? { _target_role: input.target.role } : {};
 			const webTag = webCorroboration ? { _web_corroboration: webCorroboration } : {};
 			if (fixture && fixture.length > 0) {
 				for (const f of fixture) {
@@ -175,4 +178,16 @@ export class MockStructurer implements Structurer {
 		}
 		return { drafts, conflicts: [], wiki_proposals, wiki_slugs_used };
 	}
+}
+
+// Selection helper used by index.ts. Mirrors selectVerifier in
+// adapters/verifier.ts. CODEX_CLI=1 opts into the Codex CLI engine (#18) so
+// imports bill against a ChatGPT subscription quota instead of an OpenAI API
+// key. With no opt-in, the MockStructurer is used — production with real LLM
+// is still a #15 follow-up beyond this engine.
+export function selectStructurer(env: NodeJS.ProcessEnv = process.env): Structurer {
+	if (env.CODEX_CLI === "1") {
+		return new CodexCliStructurer({ model: env.CODEX_MODEL });
+	}
+	return new MockStructurer();
 }
