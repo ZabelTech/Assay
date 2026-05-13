@@ -11,7 +11,9 @@ describe("§7.2 endorser email verification", () => {
 	afterEach(() => server.close());
 
 	async function startEndorsement(payload: unknown) {
-		return server.rawFetch("/admin/api/endorsement/start", {
+		// #7 Phase 5: solicit now requires admin auth + completed subject verification.
+		// The helper defaults to subjectVerified=true so the gate is satisfied here.
+		return server.adminFetch("/admin/api/endorsement/solicit", {
 			method: "POST",
 			headers: { "content-type": "application/json" },
 			body: JSON.stringify(payload),

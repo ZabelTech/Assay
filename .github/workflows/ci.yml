@@ -21,6 +21,8 @@ jobs:
         run: npm ci
       - name: Check no skipped tests
         run: npm run check:skips
+      - name: Wiki lint
+        run: npm run wiki:check
       - name: Test
         run: npm test
       - name: Build

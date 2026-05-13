@@ -4,12 +4,25 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { randomBytes } from "node:crypto";
+import type { Database } from "better-sqlite3";
+import type { AdminTokensRepo } from "../storage/admin_tokens.repo.js";
 import type { AuditRepo } from "../storage/audit.repo.js";
 import type { ClaimsRepo } from "../storage/claims.repo.js";
+import type { ClaimDraftsRepo } from "../storage/claim_drafts.repo.js";
+import type { HandlesRepo } from "../storage/handles.repo.js";
 import type { SubjectRepo } from "../storage/subject.repo.js";
 import type { TokensRepo } from "../storage/tokens.repo.js";
+import type { OAuthProvider } from "../adapters/oauth.js";
+import type { PdfParser } from "../adapters/pdf_parser.js";
+import type { Structurer } from "../adapters/structurer.js";
+import type { EvidenceStore } from "../adapters/evidence_store.js";
 import type { Mailer } from "../adapters/mailer.js";
 import type { Synthesizer } from "../adapters/synthesizer.js";
+import type { PendingWikiProposalsRepo } from "../storage/pending_wiki_proposals.repo.js";
+import type { ConflictsRepo } from "../storage/conflicts.repo.js";
+import type { WikiRepo } from "../wiki/repo.js";
+import type { ImportPipeline } from "../pipeline/import_pipeline.js";
+import { mountAdminRoutes } from "../admin/routes.js";
 import { extractToken } from "./auth.js";
 import { CairnError } from "./errors.js";
 import { handleQueryCareer } from "../tools/query_career.js";
@@ -18,8 +31,6 @@ import { handleGetClaim } from "../tools/get_claim.js";
 import { readIdentityResource } from "../resources/identity.js";
 import { readSchemaResource } from "../resources/schema.js";
 import { readServerInfoResource } from "../resources/server_info.js";
-import { handleSubjectVerifyStart, handleSubjectVerifyComplete } from "../verification/subject.js";
-import { handleEndorsementStart, handleEndorsementComplete } from "../verification/endorser.js";
 
 const MAX_REQUEST_BYTES = 5 * 1024 * 1024; // §12 — career objects under 5MB.
 const PROTOCOL_VERSION = "2025-06-18";
@@ -79,12 +90,24 @@ export interface BuildAppDeps {
 	subject: string;
 	operatorUrl: string;
 	operatorType?: "hosted" | "self_hosted" | "experimental";
+	db: Database;
 	claims: ClaimsRepo;
 	tokens: TokensRepo;
 	audit: AuditRepo;
 	subjects: SubjectRepo;
+	adminTokens: AdminTokensRepo;
+	handles: HandlesRepo;
+	drafts: ClaimDraftsRepo;
+	evidenceStore: EvidenceStore;
 	mailer: Mailer;
 	synthesizer: Synthesizer;
+	structurer: Structurer;
+	oauthProviders: Map<string, OAuthProvider>;
+	pdfParser: PdfParser;
+	pipeline: ImportPipeline;
+	wikiProposals: PendingWikiProposalsRepo;
+	wikiRepo: WikiRepo;
+	conflicts: ConflictsRepo;
 	rateLimit: { window_ms: number; max: number };
 	corsOrigins: string[];
 }
@@ -133,37 +156,28 @@ export function buildApp(depsIn: BuildAppDeps) {
 
 	app.get("/healthz", (c) => c.text("ok"));
 
-	// Admin API (verification flows + token issuance). Not MCP. Mounted under /admin/api.
-	app.post("/admin/api/subject/verify/start", async (c) => {
-		const body = (await c.req.json().catch(() => ({}))) as { email?: string; method?: string };
-		const result = await handleSubjectVerifyStart(deps, body);
-		return c.json(result, 202);
-	});
-	app.get("/admin/api/subject/verify/complete", async (c) => {
-		const challenge = c.req.query("challenge");
-		const ok = handleSubjectVerifyComplete(deps, { challenge });
-		return c.json({ ok }, ok ? 200 : 400);
-	});
-	app.post("/admin/api/subject/verify/complete", async (c) => {
-		const body = (await c.req.json().catch(() => ({}))) as { email?: string; code?: string };
-		const ok = handleSubjectVerifyComplete(deps, body);
-		return c.json({ ok }, ok ? 200 : 400);
-	});
-
-	app.post("/admin/api/endorsement/start", async (c) => {
-		const body = (await c.req.json().catch(() => ({}))) as {
-			endorser_email?: string;
-			endorser_name?: string;
-			value?: unknown;
-		};
-		const result = await handleEndorsementStart(deps, body);
-		return c.json(result, 202);
-	});
-	app.get("/admin/api/endorsement/complete", async (c) => {
-		const challenge = c.req.query("challenge");
-		const discloseLocal = c.req.query("disclose_local") === "1";
-		const ok = handleEndorsementComplete(deps, { challenge, discloseLocal });
-		return c.json({ ok }, ok ? 200 : 400);
+	// Admin API routes (#7). /admin/api/whoami, /admin/api/subject/* — all gated by the
+	// admin bearer except completion endpoints (the email challenge is the credential).
+	// Phase 5 will migrate /admin/api/endorsement/* into the same module.
+	mountAdminRoutes(app, {
+		subject: deps.subject,
+		operatorUrl: deps.operatorUrl,
+		operatorType: deps.operatorType ?? "self_hosted",
+		db: deps.db,
+		adminTokens: deps.adminTokens,
+		subjects: deps.subjects,
+		claims: deps.claims,
+		tokens: deps.tokens,
+		audit: deps.audit,
+		handles: deps.handles,
+		drafts: deps.drafts,
+		mailer: deps.mailer,
+		evidenceStore: deps.evidenceStore,
+		pipeline: deps.pipeline,
+		oauthProviders: deps.oauthProviders,
+		wikiProposals: deps.wikiProposals,
+		wikiRepo: deps.wikiRepo,
+		conflicts: deps.conflicts,
 	});
 
 	// MCP transport: POST to /mcp, /mcp?t=, or /mcp/t/<token>
@@ -272,9 +286,13 @@ async function dispatch(deps: BuildAppDeps, payload: any, auth: AuthState): Prom
 	if (method === "resources/list") {
 		return { resources: RESOURCES };
 	}
+	// #7 change-email: the current subject may differ from the config-time `deps.subject`
+	// (initial bootstrap value) after a change-email cascade. Honour the dynamic pointer.
+	const currentSubject = deps.subjects.getCurrentSubject() ?? deps.subject;
+
 	if (method === "tools/call") {
 		// Subject verification gate (§4.1).
-		if (!deps.subjects.isVerified(deps.subject)) {
+		if (!deps.subjects.isVerified(currentSubject)) {
 			throw new CairnError("subject_unverified", "subject email not yet verified");
 		}
 		const { name, arguments: args } = payload.params ?? {};
@@ -291,10 +309,10 @@ async function dispatch(deps: BuildAppDeps, payload: any, auth: AuthState): Prom
 			return readSchemaResource();
 		}
 		if (uri === "cairn://identity") {
-			if (!deps.subjects.isVerified(deps.subject)) {
+			if (!deps.subjects.isVerified(currentSubject)) {
 				throw new CairnError("subject_unverified", "subject email not yet verified");
 			}
-			return readIdentityResource(deps);
+			return readIdentityResource({ ...deps, subject: currentSubject });
 		}
 		throw new CairnError("malformed_input", `unknown resource uri: ${uri}`);
 	}

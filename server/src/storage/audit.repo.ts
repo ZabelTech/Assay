@@ -23,13 +23,28 @@ export class AuditRepo {
 			);
 	}
 
-	list(): AuditEntry[] {
+	list(opts: { token_id?: string; since?: string; tool?: string } = {}): AuditEntry[] {
+		const clauses: string[] = [];
+		const params: unknown[] = [];
+		if (opts.token_id) {
+			clauses.push("token_id = ?");
+			params.push(opts.token_id);
+		}
+		if (opts.since) {
+			clauses.push("timestamp >= ?");
+			params.push(opts.since);
+		}
+		if (opts.tool) {
+			clauses.push("tool = ?");
+			params.push(opts.tool);
+		}
+		const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
 		const rows = this.db
 			.prepare(
 				`SELECT request_id, token_id, audience_hint, purpose, timestamp, tool, claim_ids_returned, claim_ids_consulted
-				 FROM audit_log ORDER BY rowid ASC`,
+				 FROM audit_log ${where} ORDER BY rowid ASC`,
 			)
-			.all() as {
+			.all(...params) as {
 			request_id: string;
 			token_id: string | null;
 			audience_hint: string | null;

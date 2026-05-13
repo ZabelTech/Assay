@@ -27,6 +27,56 @@ export class ClaimsRepo {
 		return row ? (JSON.parse(row.body) as Claim) : undefined;
 	}
 
+	delete(claim_id: string): boolean {
+		const info = this.db.prepare(`DELETE FROM claims WHERE claim_id = ?`).run(claim_id);
+		return info.changes > 0;
+	}
+
+	rewriteSelfAttestedSubject(oldEmail: string, newEmail: string): number {
+		// #7 change-email cascade: `self_attested` claim subjects are rewritten atomically.
+		// Returns the number of claims rewritten.
+		// `email_attested` claims are bound to the subject at endorsement time (§4) and
+		// must be removed via deleteByAttestationLevel("email_attested") instead.
+		const rows = this.db
+			.prepare(`SELECT claim_id, body FROM claims WHERE subject = ?`)
+			.all(oldEmail) as { claim_id: string; body: string }[];
+		let count = 0;
+		const tx = this.db.transaction((items: typeof rows) => {
+			for (const row of items) {
+				const claim = JSON.parse(row.body) as Claim;
+				if (claim.attestation.level !== "self_attested") continue;
+				claim.subject = newEmail;
+				const body = JSON.stringify(claim);
+				this.db
+					.prepare(`UPDATE claims SET subject = ?, body = ? WHERE claim_id = ?`)
+					.run(newEmail, body, row.claim_id);
+				count++;
+			}
+		});
+		tx(rows);
+		return count;
+	}
+
+	deleteByAttestationLevel(level: "self_attested" | "email_attested" | "derived"): number {
+		// #7 change-email cascade: remove every claim whose attestation level matches.
+		// Walks all rows because attestation is stored only inside `body` JSON.
+		const rows = this.db.prepare(`SELECT claim_id, body FROM claims`).all() as {
+			claim_id: string;
+			body: string;
+		}[];
+		const toDelete: string[] = [];
+		for (const row of rows) {
+			const claim = JSON.parse(row.body) as Claim;
+			if (claim.attestation.level === level) toDelete.push(row.claim_id);
+		}
+		const stmt = this.db.prepare(`DELETE FROM claims WHERE claim_id = ?`);
+		const tx = this.db.transaction((ids: string[]) => {
+			for (const id of ids) stmt.run(id);
+		});
+		tx(toDelete);
+		return toDelete.length;
+	}
+
 	list(opts: { type?: string; since?: string; limit?: number; cursor?: string; visibility?: string[] } = {}): Claim[] {
 		const clauses: string[] = [];
 		const params: unknown[] = [];

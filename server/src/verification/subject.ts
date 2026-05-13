@@ -1,8 +1,17 @@
 // §4.1 — Subject email verification. Challenge → email → response → marked verified.
-import type { BuildAppDeps } from "../mcp/transport.js";
+import type { Mailer } from "../adapters/mailer.js";
+import type { SubjectRepo } from "../storage/subject.repo.js";
+
+// Structural shape — accepts both the full BuildAppDeps (transport) and the focused
+// AdminSubjectDeps (admin layer). Keeps the verification primitives reusable.
+interface SubjectVerifyDeps {
+	subjects: SubjectRepo;
+	mailer: Mailer;
+	operatorUrl: string;
+}
 
 export async function handleSubjectVerifyStart(
-	deps: BuildAppDeps,
+	deps: SubjectVerifyDeps,
 	body: { email?: string; method?: string },
 ): Promise<{ ok: boolean }> {
 	const email = body.email;
@@ -24,7 +33,7 @@ export async function handleSubjectVerifyStart(
 }
 
 export function handleSubjectVerifyComplete(
-	deps: BuildAppDeps,
+	deps: SubjectVerifyDeps,
 	input: { challenge?: string; email?: string; code?: string },
 ): boolean {
 	const consumed = deps.subjects.consumeChallenge(input);

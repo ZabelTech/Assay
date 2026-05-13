@@ -30,7 +30,7 @@ describe("§4.1 subject email verification", () => {
 	it("starts the verification flow via the internal API (click_through_link)", async () => {
 		// WHY: §4.1 + §7.2.1 — the click_through challenge sends an email containing a unique single-use token.
 		// We assert the CaptureMailer received the challenge and the link contains the token.
-		const res = await server.rawFetch("/admin/api/subject/verify/start", {
+		const res = await server.adminFetch("/admin/api/subject/verify/start", {
 			method: "POST",
 			headers: { "content-type": "application/json" },
 			body: JSON.stringify({ email: server.subject, method: "click_through_link" }),
@@ -44,7 +44,7 @@ describe("§4.1 subject email verification", () => {
 	});
 
 	it("completes verification on a click-through and unblocks the MCP surface", async () => {
-		await server.rawFetch("/admin/api/subject/verify/start", {
+		await server.adminFetch("/admin/api/subject/verify/start", {
 			method: "POST",
 			headers: { "content-type": "application/json" },
 			body: JSON.stringify({ email: server.subject, method: "click_through_link" }),
@@ -65,7 +65,7 @@ describe("§4.1 subject email verification", () => {
 
 	it("supports the code_return challenge method", async () => {
 		// WHY: §7.2.1 — code_return is the alternative method; servers MUST support both.
-		const start = await server.rawFetch("/admin/api/subject/verify/start", {
+		const start = await server.adminFetch("/admin/api/subject/verify/start", {
 			method: "POST",
 			headers: { "content-type": "application/json" },
 			body: JSON.stringify({ email: server.subject, method: "code_return" }),
@@ -84,7 +84,7 @@ describe("§4.1 subject email verification", () => {
 	});
 
 	it("rejects an incorrect code", async () => {
-		await server.rawFetch("/admin/api/subject/verify/start", {
+		await server.adminFetch("/admin/api/subject/verify/start", {
 			method: "POST",
 			headers: { "content-type": "application/json" },
 			body: JSON.stringify({ email: server.subject, method: "code_return" }),

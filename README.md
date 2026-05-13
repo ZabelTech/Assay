@@ -138,6 +138,16 @@ The last command prints a tokenized URL. Share it with a recruiter; their MCP cl
 
 The `docker run` image will become `docker run … ghcr.io/zabeltech/assay` once the published image lands.
 
+### Using your ChatGPT subscription for imports
+
+LinkedIn / GitHub / PDF / paste imports run through an LLM structurer. By default the server uses a fixture-driven `MockStructurer` that returns canned narrative drafts. If you have a ChatGPT Plus, Pro, Business, Edu, or Enterprise subscription you can route import-time LLM calls through your subscription quota instead of paying for the OpenAI API.
+
+1. Install the [Codex CLI](https://developers.openai.com/codex/cli) on the host where the Assay server runs.
+2. Run `codex login` (browser OAuth) or `codex login --device-auth` (headless device-code flow). Tokens persist in `~/.codex/` and auto-refresh.
+3. Start Assay with `CODEX_CLI=1` set in the environment. The structurer pins `--model gpt-5.5` by default (the currently-recommended Codex model as of mid-2026). Override with `CODEX_MODEL=gpt-5.4` (or `gpt-5.5-codex`, etc.) if your subscription tier doesn't include the default or you want a Codex-specific variant.
+
+Caveat: OpenAI's docs recommend API-key auth for unattended automation; ChatGPT-account auth works in practice but isn't officially blessed for service use. If imports start failing with auth errors, re-run `codex login`. Subscription quotas are metered in 5-hour windows plus a weekly cap — the structurer surfaces quota-exceeded responses as a typed error the admin layer translates to a clean 503-class response.
+
 ## Repository layout
 
 ```
@@ -147,7 +157,7 @@ assay/
 └── schemas/           # JSON-LD context for career data
 ```
 
-Additional surfaces — example clients (issue #9), recruiter-side query agent (issue #10), hosted onboarding (issue #7), and the hero page (issue #8) — live in follow-up tracking issues.
+Additional surfaces — example clients (issue #9), recruiter-side query agent (issue #10), candidate admin API (issue #7), and the hero page (issue #8) — live in follow-up tracking issues.
 
 ## Roadmap
 

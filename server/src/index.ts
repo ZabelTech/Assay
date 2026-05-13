@@ -1,14 +1,41 @@
 // Entrypoint: load config, wire dependencies, start Hono on @hono/node-server.
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
-import { loadConfig } from "./config.js";
+import { LocalEvidenceStore } from "./adapters/evidence_store.js";
 import { CaptureMailer, SmtpMailer } from "./adapters/mailer.js";
+import { MockOAuthProvider } from "./adapters/oauth.js";
+import { MockPdfParser } from "./adapters/pdf_parser.js";
+import {
+	GithubNormalizer,
+	LinkedinNormalizer,
+	PasteNormalizer,
+	PdfNormalizer,
+	type SourceNormalizerRegistry,
+	UrlSnapshotNormalizer,
+} from "./adapters/source_normalizer.js";
+import { selectStructurer } from "./adapters/structurer.js";
 import { StubSynthesizer } from "./adapters/synthesizer.js";
-import { openDatabase } from "./storage/db.js";
-import { ClaimsRepo } from "./storage/claims.repo.js";
-import { TokensRepo } from "./storage/tokens.repo.js";
-import { AuditRepo } from "./storage/audit.repo.js";
-import { SubjectRepo } from "./storage/subject.repo.js";
+import { selectVerifier } from "./adapters/verifier.js";
+import { MockWebSearch } from "./adapters/web_search.js";
+import { loadConfig } from "./config.js";
+import { CorpusStore } from "./corpus/store.js";
 import { buildApp } from "./mcp/transport.js";
+import { ImportPipeline } from "./pipeline/import_pipeline.js";
+import { AdminTokensRepo } from "./storage/admin_tokens.repo.js";
+import { AuditRepo } from "./storage/audit.repo.js";
+import { ClaimDraftsRepo } from "./storage/claim_drafts.repo.js";
+import { ClaimsRepo } from "./storage/claims.repo.js";
+import { ConflictsRepo } from "./storage/conflicts.repo.js";
+import { CorpusMetadataRepo } from "./storage/corpus_metadata.repo.js";
+import { openDatabase } from "./storage/db.js";
+import { HandlesRepo } from "./storage/handles.repo.js";
+import { PendingWikiProposalsRepo } from "./storage/pending_wiki_proposals.repo.js";
+import { SubjectRepo } from "./storage/subject.repo.js";
+import { TokensRepo } from "./storage/tokens.repo.js";
+import { WikiPageUsesRepo } from "./storage/wiki_page_uses.repo.js";
+import { EmptyWikiReader, FsWikiReader, type WikiReader } from "./wiki/reader.js";
+import { WikiRepo } from "./wiki/repo.js";
 
 const cfg = loadConfig();
 
@@ -31,14 +58,89 @@ const mailer =
 			})
 		: new CaptureMailer();
 
+// Resolve the bundled wiki linter CLI path. In the Dockerfile prod layout the
+// CLI sits at server/dist/wiki/page_lint_cli.js next to this entrypoint. The
+// pre-commit hook script invokes `node <path> <repoDir>`.
+const HERE = dirname(fileURLToPath(import.meta.url));
+const linterCliJs = resolve(HERE, "wiki/page_lint_cli.js");
+const wikiRepo = new WikiRepo({
+	repoDir: cfg.wikiRepoDir,
+	seedDir: cfg.wikiSeedDir,
+	linterCommand: `node ${linterCliJs}`,
+	authorEmail: cfg.subject,
+});
+await wikiRepo.initIfMissing();
+
+// #15 / #16 wiki reader — loads pages from the local wiki repo (seeded from
+// the bundled wiki/ on first boot via WikiRepo.initIfMissing).
+let wikiReader: WikiReader;
+try {
+	wikiReader = await FsWikiReader.load(cfg.wikiRepoDir);
+} catch {
+	wikiReader = new EmptyWikiReader();
+}
+
+const claims = new ClaimsRepo(db);
+const drafts = new ClaimDraftsRepo(db);
+const conflictsRepo = new ConflictsRepo(db);
+const wikiProposals = new PendingWikiProposalsRepo(db);
+const wikiPageUses = new WikiPageUsesRepo(db);
+const corpusMetadata = new CorpusMetadataRepo(db);
+const corpusStore = new CorpusStore(cfg.corpusDir);
+const evidenceStore = new LocalEvidenceStore(cfg.evidenceDir);
+const pdfParser = new MockPdfParser();
+const structurer = selectStructurer(process.env);
+const web = new MockWebSearch();
+const verifier = selectVerifier(process.env);
+
+const normalizers: SourceNormalizerRegistry = {
+	paste: new PasteNormalizer(),
+	pdf: new PdfNormalizer(pdfParser),
+	linkedin: new LinkedinNormalizer(),
+	github: new GithubNormalizer(),
+	"url-snapshot": new UrlSnapshotNormalizer(),
+};
+
+const pipeline = new ImportPipeline({
+	db,
+	corpusStore,
+	corpusMetadata,
+	evidenceStore,
+	claims,
+	drafts,
+	conflicts: conflictsRepo,
+	wikiProposals,
+	wikiPageUses,
+	wikiReader,
+	web,
+	normalizers,
+	structurer,
+	verifier,
+});
+
 const app = buildApp({
 	subject: cfg.subject,
 	operatorUrl: cfg.operatorUrl,
 	operatorType: cfg.operatorType,
-	claims: new ClaimsRepo(db),
+	db,
+	claims,
 	tokens: new TokensRepo(db),
 	audit: new AuditRepo(db),
 	subjects: new SubjectRepo(db),
+	adminTokens: new AdminTokensRepo(db),
+	handles: new HandlesRepo(db),
+	drafts,
+	evidenceStore,
+	wikiProposals,
+	wikiRepo,
+	conflicts: conflictsRepo,
+	pipeline,
+	structurer,
+	pdfParser,
+	oauthProviders: new Map([
+		["linkedin", new MockOAuthProvider("linkedin")],
+		["github", new MockOAuthProvider("github")],
+	]),
 	mailer,
 	synthesizer: new StubSynthesizer(),
 	rateLimit: cfg.rateLimit,
