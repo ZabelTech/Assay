@@ -12,6 +12,7 @@
 // pipeline doesn't re-trigger after resolution; the candidate has the steering
 // wheel.
 import type { Context, Hono } from "hono";
+import type { AdminAuditRepo } from "../storage/admin_audit.repo.js";
 import type { AdminTokensRepo } from "../storage/admin_tokens.repo.js";
 import type { ClaimDraftsRepo } from "../storage/claim_drafts.repo.js";
 import type { ClaimsRepo } from "../storage/claims.repo.js";
@@ -24,6 +25,7 @@ const VALID_ACTIONS: ConflictResolution[] = ["merge", "keep_both", "edit", "drop
 
 export interface AdminConflictsDeps {
 	adminTokens: AdminTokensRepo;
+	adminAudit: AdminAuditRepo;
 	conflicts: ConflictsRepo;
 	subjects: SubjectRepo;
 	claims: ClaimsRepo;
@@ -79,6 +81,11 @@ export function mountAdminConflictsRoutes(app: Hono, deps: AdminConflictsDeps): 
 		if (!ok) {
 			return malformed(c, "conflict already resolved");
 		}
+		deps.adminAudit.record({
+			action: "conflict.resolve",
+			target: conflict.conflict_id,
+			details: { resolution: action },
+		});
 		return c.json({ conflict_id: conflict.conflict_id, resolution: action }, 200);
 	});
 }

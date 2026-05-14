@@ -84,23 +84,36 @@ export class SubjectRepo {
 	consumeChallenge(opts: { challenge?: string; email?: string; code?: string }):
 		| { email: string; method: string }
 		| undefined {
-		let row: { challenge: string; email: string; method: string; code: string | null; consumed: number } | undefined;
+		// Atomic compare-and-swap via UPDATE ... WHERE consumed = 0 RETURNING. Two
+		// concurrent callers can both observe `consumed = 0` in a separate SELECT,
+		// then both flip the flag and both believe they consumed the challenge —
+		// the single-statement form has SQLite serialize the write.
+		let row: { email: string; method: string } | undefined;
 		if (opts.challenge) {
 			row = this.db
-				.prepare(`SELECT challenge, email, method, code, consumed FROM subject_challenges WHERE challenge = ?`)
+				.prepare(
+					`UPDATE subject_challenges SET consumed = 1
+					 WHERE challenge = ? AND consumed = 0
+					 RETURNING email, method`,
+				)
 				.get(opts.challenge) as typeof row;
 		} else if (opts.email && opts.code) {
+			// Pick the newest matching unconsumed challenge and flip it in one shot. SQLite
+			// doesn't accept ORDER BY/LIMIT directly in UPDATE, so we scope by a subquery on
+			// rowid. The unique rowid selection plus the consumed-0 guard keeps it atomic.
 			row = this.db
 				.prepare(
-					`SELECT challenge, email, method, code, consumed FROM subject_challenges
-					 WHERE email = ? AND code = ? AND consumed = 0
-					 ORDER BY rowid DESC LIMIT 1`,
+					`UPDATE subject_challenges SET consumed = 1
+					 WHERE rowid = (
+						SELECT rowid FROM subject_challenges
+						WHERE email = ? AND code = ? AND consumed = 0
+						ORDER BY rowid DESC LIMIT 1
+					 )
+					 RETURNING email, method`,
 				)
 				.get(opts.email, opts.code) as typeof row;
 		}
-		if (!row || row.consumed === 1) return undefined;
-		this.db.prepare(`UPDATE subject_challenges SET consumed = 1 WHERE challenge = ?`).run(row.challenge);
-		return { email: row.email, method: row.method };
+		return row;
 	}
 
 	createEndorsementChallenge(opts: {
@@ -204,16 +217,17 @@ export class SubjectRepo {
 	consumeEndorsementChallenge(challenge: string):
 		| { endorser_email: string; endorser_name: string | null; value: unknown }
 		| undefined {
+		// Atomic compare-and-swap. See consumeChallenge above for the rationale.
 		const row = this.db
 			.prepare(
-				`SELECT challenge, endorser_email, endorser_name, value_json, consumed
-				 FROM endorsement_challenges WHERE challenge = ?`,
+				`UPDATE endorsement_challenges SET consumed = 1
+				 WHERE challenge = ? AND consumed = 0
+				 RETURNING endorser_email, endorser_name, value_json`,
 			)
 			.get(challenge) as
-			| { challenge: string; endorser_email: string; endorser_name: string | null; value_json: string; consumed: number }
+			| { endorser_email: string; endorser_name: string | null; value_json: string }
 			| undefined;
-		if (!row || row.consumed === 1) return undefined;
-		this.db.prepare(`UPDATE endorsement_challenges SET consumed = 1 WHERE challenge = ?`).run(challenge);
+		if (!row) return undefined;
 		return {
 			endorser_email: row.endorser_email,
 			endorser_name: row.endorser_name,

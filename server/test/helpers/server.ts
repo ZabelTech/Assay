@@ -30,6 +30,7 @@ import {
 } from "../../src/adapters/source_normalizer.js";
 import { ClaimDraftsRepo } from "../../src/storage/claim_drafts.repo.js";
 import { openDatabase } from "../../src/storage/db.js";
+import { AdminAuditRepo } from "../../src/storage/admin_audit.repo.js";
 import { AdminTokensRepo } from "../../src/storage/admin_tokens.repo.js";
 import { ClaimsRepo } from "../../src/storage/claims.repo.js";
 import { TokensRepo } from "../../src/storage/tokens.repo.js";
@@ -74,6 +75,7 @@ export interface TestServer {
 	audit: AuditRepo;
 	subjects: SubjectRepo;
 	adminTokens: AdminTokensRepo;
+	adminAudit: AdminAuditRepo;
 	drafts: ClaimDraftsRepo;
 	structurer: MockStructurer;
 	web: MockWebSearch;
@@ -120,6 +122,7 @@ export async function buildTestServer(opts: BuildTestServerOpts = {}): Promise<T
 	const audit = new AuditRepo(db);
 	const subjects = new SubjectRepo(db);
 	const adminTokens = new AdminTokensRepo(db);
+	const adminAudit = new AdminAuditRepo(db);
 	const handles = new HandlesRepo(db);
 	const drafts = new ClaimDraftsRepo(db);
 	const evidenceStore = new MemoryEvidenceStore();
@@ -205,6 +208,7 @@ export async function buildTestServer(opts: BuildTestServerOpts = {}): Promise<T
 		audit,
 		subjects,
 		adminTokens,
+		adminAudit,
 		handles,
 		drafts,
 		evidenceStore,
@@ -242,6 +246,7 @@ export async function buildTestServer(opts: BuildTestServerOpts = {}): Promise<T
 		audit,
 		subjects,
 		adminTokens,
+		adminAudit,
 		drafts,
 		structurer,
 		web,

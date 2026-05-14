@@ -5,6 +5,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { randomBytes } from "node:crypto";
 import type { Database } from "better-sqlite3";
+import type { AdminAuditRepo } from "../storage/admin_audit.repo.js";
 import type { AdminTokensRepo } from "../storage/admin_tokens.repo.js";
 import type { AuditRepo } from "../storage/audit.repo.js";
 import type { ClaimsRepo } from "../storage/claims.repo.js";
@@ -96,6 +97,7 @@ export interface BuildAppDeps {
 	audit: AuditRepo;
 	subjects: SubjectRepo;
 	adminTokens: AdminTokensRepo;
+	adminAudit: AdminAuditRepo;
 	handles: HandlesRepo;
 	drafts: ClaimDraftsRepo;
 	evidenceStore: EvidenceStore;
@@ -165,6 +167,7 @@ export function buildApp(depsIn: BuildAppDeps) {
 		operatorType: deps.operatorType ?? "self_hosted",
 		db: deps.db,
 		adminTokens: deps.adminTokens,
+		adminAudit: deps.adminAudit,
 		subjects: deps.subjects,
 		claims: deps.claims,
 		tokens: deps.tokens,

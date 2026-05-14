@@ -2,6 +2,7 @@
 // revokes all outstanding tokens — URLs embed the old handle and would otherwise break
 // in recipients' hands.
 import type { Hono, Context } from "hono";
+import type { AdminAuditRepo } from "../storage/admin_audit.repo.js";
 import type { AdminTokensRepo } from "../storage/admin_tokens.repo.js";
 import type { HandlesRepo } from "../storage/handles.repo.js";
 import type { TokensRepo } from "../storage/tokens.repo.js";
@@ -11,6 +12,7 @@ import { requireAdmin } from "./auth.js";
 
 export interface AdminHandleDeps {
 	adminTokens: AdminTokensRepo;
+	adminAudit: AdminAuditRepo;
 	handles: HandlesRepo;
 	tokens: TokensRepo;
 	operatorType: "hosted" | "self_hosted" | "experimental";
@@ -52,6 +54,11 @@ export function mountAdminHandleRoutes(app: Hono, deps: AdminHandleDeps): void {
 		// #7: handle change auto-revokes all outstanding tokens.
 		const revoked = deps.tokens.revokeAll();
 		deps.handles.set(handle);
+		deps.adminAudit.record({
+			action: "handle.set",
+			target: handle,
+			details: { revoked_tokens: revoked },
+		});
 		return c.json({ handle, revoked_tokens: revoked });
 	});
 }

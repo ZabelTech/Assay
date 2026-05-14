@@ -3,6 +3,7 @@
 // unauthenticated because the email-delivered challenge is the credential.
 import type { Hono } from "hono";
 import type { Database } from "better-sqlite3";
+import type { AdminAuditRepo } from "../storage/admin_audit.repo.js";
 import type { AdminTokensRepo } from "../storage/admin_tokens.repo.js";
 import type { AuditRepo } from "../storage/audit.repo.js";
 import type { ClaimsRepo } from "../storage/claims.repo.js";
@@ -35,6 +36,7 @@ export interface AdminRouteDeps {
 	operatorType: "hosted" | "self_hosted" | "experimental";
 	db: Database;
 	adminTokens: AdminTokensRepo;
+	adminAudit: AdminAuditRepo;
 	subjects: SubjectRepo;
 	claims: ClaimsRepo;
 	tokens: TokensRepo;
@@ -75,6 +77,7 @@ export function mountAdminRoutes(app: Hono, deps: AdminRouteDeps): void {
 		claims: deps.claims,
 		subjects: deps.subjects,
 		adminTokens: deps.adminTokens,
+		adminAudit: deps.adminAudit,
 		defaultSubject: deps.subject,
 	});
 
@@ -95,6 +98,7 @@ export function mountAdminRoutes(app: Hono, deps: AdminRouteDeps): void {
 
 	mountAdminTokenRoutes(app, {
 		adminTokens: deps.adminTokens,
+		adminAudit: deps.adminAudit,
 		subjects: deps.subjects,
 		tokens: deps.tokens,
 		defaultSubject: deps.subject,
@@ -103,10 +107,12 @@ export function mountAdminRoutes(app: Hono, deps: AdminRouteDeps): void {
 	mountAdminAuditRoutes(app, {
 		adminTokens: deps.adminTokens,
 		audit: deps.audit,
+		adminAudit: deps.adminAudit,
 	});
 
 	mountAdminHandleRoutes(app, {
 		adminTokens: deps.adminTokens,
+		adminAudit: deps.adminAudit,
 		handles: deps.handles,
 		tokens: deps.tokens,
 		operatorType: deps.operatorType,
@@ -123,12 +129,14 @@ export function mountAdminRoutes(app: Hono, deps: AdminRouteDeps): void {
 
 	mountAdminWikiProposalsRoutes(app, {
 		adminTokens: deps.adminTokens,
+		adminAudit: deps.adminAudit,
 		proposals: deps.wikiProposals,
 		wikiRepo: deps.wikiRepo,
 	});
 
 	mountAdminConflictsRoutes(app, {
 		adminTokens: deps.adminTokens,
+		adminAudit: deps.adminAudit,
 		conflicts: deps.conflicts,
 		subjects: deps.subjects,
 		claims: deps.claims,

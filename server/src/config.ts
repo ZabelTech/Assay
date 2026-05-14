@@ -39,7 +39,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 			pass: env.SMTP_PASS,
 			from: env.SMTP_FROM,
 		},
-		corsOrigins: (env.CORS_ORIGINS ?? "*").split(",").map((s) => s.trim()),
+		// Default to same-origin only. Operators that need cross-origin access (recruiter
+		// agents in a browser, hosted UI on a different host) MUST set CORS_ORIGINS
+		// explicitly — defaulting to "*" would silently broaden the trust surface beyond
+		// what most self-hosters want.
+		corsOrigins: (env.CORS_ORIGINS ?? "").split(",").map((s) => s.trim()).filter((s) => s.length > 0),
 		rateLimit: {
 			window_ms: parseInt(env.RATE_LIMIT_WINDOW_MS ?? "60000", 10),
 			max: parseInt(env.RATE_LIMIT_MAX ?? "60", 10),

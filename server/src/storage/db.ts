@@ -148,6 +148,21 @@ CREATE TABLE IF NOT EXISTS wiki_page_uses (
 );
 
 CREATE INDEX IF NOT EXISTS idx_wiki_page_uses_slug ON wiki_page_uses (slug);
+
+-- Admin-mutation audit log. Distinct from audit_log (which is per-§9.4 the
+-- MCP-request log: tool, claim_ids_returned, etc.). admin_audit records the
+-- candidate's own control-plane actions — token issuance, claim CRUD, handle
+-- change, wiki promote — so a compromised admin token can't operate silently.
+-- Read surface: GET /admin/api/admin_audit.
+CREATE TABLE IF NOT EXISTS admin_audit (
+	rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+	timestamp TEXT NOT NULL,
+	action TEXT NOT NULL,
+	target TEXT,
+	details TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_admin_audit_timestamp ON admin_audit (timestamp);
 `;
 
 export function openDatabase(path: string): DB {
