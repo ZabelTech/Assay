@@ -75,8 +75,29 @@ const PRE_COMMIT_HOOK = (linterCommand: string, repoDir: string) => `#!/bin/sh
 exec ${linterCommand} ${JSON.stringify(repoDir)}
 `;
 
+// The hook splices `linterCommand` directly into a shell script. Today every
+// caller passes a trusted, hard-coded prefix, but template-interpolating into
+// a shell script is fragile by construction — a future caller passing user
+// data here would be an instant RCE. Reject anything that could change the
+// command's shape (metacharacters, newlines, redirects, quotes) at construction
+// time so the failure happens loudly and immediately.
+const SAFE_LINTER_COMMAND = /^[A-Za-z0-9 ._/\\:+=-]+$/;
+
+export function assertSafeLinterCommand(cmd: string): void {
+	if (typeof cmd !== "string" || cmd.length === 0) {
+		throw new Error("linterCommand must be a non-empty string");
+	}
+	if (!SAFE_LINTER_COMMAND.test(cmd)) {
+		throw new Error(
+			"linterCommand contains shell metacharacters; pass a plain `<bin> <script>` pair only",
+		);
+	}
+}
+
 export class WikiRepo {
-	constructor(private readonly opts: WikiRepoOptions) {}
+	constructor(private readonly opts: WikiRepoOptions) {
+		assertSafeLinterCommand(opts.linterCommand);
+	}
 
 	// Initialize the repo at opts.repoDir if it doesn't already exist. Seeds it
 	// from opts.seedDir, configures a local user, installs the pre-commit hook,

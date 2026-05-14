@@ -17,6 +17,29 @@ import type { CorpusMetadata } from "../storage/corpus_metadata.repo.js";
 
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
 
+// Defence-in-depth against LLM-influenced origin paths. The structurer is fed
+// candidate-uploaded content; a successful prompt-injection that nudges it to
+// emit a path like `linkedin/../../etc/cairn.db` would otherwise escape the
+// per-subject sources/ sandbox when `join()`-resolved. Logical paths are
+// always relative, slash-separated, no traversal, no NULs, no embedded subject
+// segment.
+export function assertSafeCorpusPath(path: string): void {
+	if (typeof path !== "string" || path.length === 0) {
+		throw new Error("corpus path must be a non-empty string");
+	}
+	if (path.includes("\0")) {
+		throw new Error("corpus path contains NUL byte");
+	}
+	if (path.startsWith("/") || path.startsWith("\\") || /^[a-zA-Z]:[\\/]/.test(path)) {
+		throw new Error(`corpus path must be relative: ${path}`);
+	}
+	for (const segment of path.split(/[\\/]/)) {
+		if (segment === "" || segment === "." || segment === "..") {
+			throw new Error(`corpus path contains forbidden segment "${segment}": ${path}`);
+		}
+	}
+}
+
 export class CorpusStore {
 	constructor(private readonly rootDir: string) {}
 
@@ -62,6 +85,7 @@ export class CorpusStore {
 	// filename. Logical path "linkedin.md" → "linkedin.v3.md"; logical
 	// "linkedin/articles/foo.md" → "linkedin/articles/foo.v3.md".
 	resolveOnDisk(subject: string, path: string, version: number): string {
+		assertSafeCorpusPath(path);
 		const ext = extname(path) || ".md";
 		const stem = path.slice(0, path.length - ext.length);
 		return join(this.rootDir, subject, "sources", `${stem}.v${version}${ext}`);

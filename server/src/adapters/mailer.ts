@@ -11,10 +11,28 @@ export interface Mailer {
 	send(email: CapturedEmail): Promise<void>;
 }
 
+// Header-injection defence. `to` and `subject` are emitted as RFC 5322 headers;
+// a CR/LF/NUL byte in either lets a caller inject a Bcc or rewrite the From
+// line. Body is unconstrained — bodies legitimately contain newlines.
+// nodemailer rejects this at send time, but failing here gives the admin layer
+// a clean error and stops a malformed value from reaching the wire at all.
+export function assertSafeMailHeaders(email: CapturedEmail): void {
+	for (const field of ["to", "subject"] as const) {
+		const v = email[field];
+		if (typeof v !== "string") {
+			throw new Error(`mail ${field} must be a string`);
+		}
+		if (/[\r\n\0]/.test(v)) {
+			throw new Error(`mail ${field} contains a forbidden CR/LF/NUL byte`);
+		}
+	}
+}
+
 export class CaptureMailer implements Mailer {
 	private box: CapturedEmail[] = [];
 
 	async send(email: CapturedEmail): Promise<void> {
+		assertSafeMailHeaders(email);
 		this.box.push(email);
 	}
 
@@ -49,6 +67,7 @@ export class SmtpMailer implements Mailer {
 	}
 
 	async send(email: CapturedEmail): Promise<void> {
+		assertSafeMailHeaders(email);
 		await this.transporter.sendMail({
 			from: this.config.from,
 			to: email.to,

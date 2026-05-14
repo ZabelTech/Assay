@@ -15,6 +15,13 @@ const CAIRN_V0_CONTEXT = "https://cairn.dev/schemas/v0";
 // §8 — evidence types.
 const sha256Z = z.string().regex(/^sha256:[0-9a-f]{64}$/);
 
+// Moment-in-time timestamps: ISO 8601 datetimes with optional offset. Applied
+// only to the fields that represent a literal "when did this happen" (envelope
+// created_at/updated_at, attestation verified_at/derived_at, evidence
+// uploaded_at). Partial-date fields (employment.start_date, project.started_at,
+// etc.) stay as plain strings — the spec lets them be year- or year-month-only.
+const isoDatetimeZ = z.string().datetime({ offset: true });
+
 const urlEvidenceZ = z.object({
 	type: z.literal("url"),
 	url: z
@@ -30,7 +37,7 @@ const documentEvidenceZ = z.object({
 	content_hash: sha256Z,
 	media_type: z.string().min(1),
 	label: z.string().optional(),
-	uploaded_at: z.string().min(1),
+	uploaded_at: isoDatetimeZ,
 	extracted: z
 		.object({ method: z.string(), fields: z.record(z.string(), z.unknown()) })
 		.optional(),
@@ -51,7 +58,7 @@ const imageEvidenceZ = z.object({
 	content_hash: sha256Z,
 	media_type: z.string().min(1),
 	label: z.string().optional(),
-	uploaded_at: z.string().min(1),
+	uploaded_at: isoDatetimeZ,
 	capture: imageCaptureZ.optional(),
 });
 
@@ -61,7 +68,7 @@ const screenshotEvidenceZ = z.object({
 	content_hash: sha256Z,
 	media_type: z.string().min(1),
 	label: z.string().optional(),
-	uploaded_at: z.string().min(1),
+	uploaded_at: isoDatetimeZ,
 	context: z.string().optional(),
 	redactions: z.array(z.string()).optional(),
 	claimed_authenticity: z
@@ -93,7 +100,7 @@ const challengeMethodZ = z.union([
 
 const emailVerificationZ = z.object({
 	verification_id: z.string().min(1),
-	verified_at: z.string().min(1),
+	verified_at: isoDatetimeZ,
 	verifier_url: z.string().url(),
 	verifier_is_subject_host: z.boolean(),
 	challenge_method: challengeMethodZ,
@@ -111,7 +118,7 @@ const emailAttestationZ = z.object({
 const derivedAttestationZ = z.object({
 	level: z.literal("derived"),
 	derived_by: z.string().url(),
-	derived_at: z.string().min(1),
+	derived_at: isoDatetimeZ,
 	method: z.string().min(1),
 	derived_from: z.array(z.string()).min(1),
 });
@@ -265,8 +272,8 @@ const claimEnvelopeZ = z.object({
 	evidence: z.array(evidenceZ).optional(),
 	attestation: attestationZ,
 	visibility: visibilityZ,
-	created_at: z.string().min(1),
-	updated_at: z.string().min(1),
+	created_at: isoDatetimeZ,
+	updated_at: isoDatetimeZ,
 });
 
 export function parseAttestation(input: unknown): Attestation {

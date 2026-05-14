@@ -10,6 +10,7 @@
 // "Ignore" is the default — a proposal that's neither promoted nor dismissed stays
 // pending indefinitely (#17 explicit), so no endpoint is needed for it.
 import type { Context, Hono } from "hono";
+import type { AdminAuditRepo } from "../storage/admin_audit.repo.js";
 import type { AdminTokensRepo } from "../storage/admin_tokens.repo.js";
 import type { PendingWikiProposalsRepo } from "../storage/pending_wiki_proposals.repo.js";
 import { WikiPromoteError, type WikiRepo } from "../wiki/repo.js";
@@ -18,6 +19,7 @@ import { requireAdmin } from "./auth.js";
 
 export interface AdminWikiProposalsDeps {
 	adminTokens: AdminTokensRepo;
+	adminAudit: AdminAuditRepo;
 	proposals: PendingWikiProposalsRepo;
 	wikiRepo: WikiRepo;
 }
@@ -36,8 +38,10 @@ export function mountAdminWikiProposalsRoutes(app: Hono, deps: AdminWikiProposal
 	});
 
 	app.delete("/admin/api/wiki/proposals/:id", admin, (c) => {
-		const ok = deps.proposals.delete(c.req.param("id"));
+		const id = c.req.param("id");
+		const ok = deps.proposals.delete(id);
 		if (!ok) return notFound(c);
+		deps.adminAudit.record({ action: "wiki_proposal.dismiss", target: id });
 		return c.body(null, 204);
 	});
 
@@ -50,6 +54,11 @@ export function mountAdminWikiProposalsRoutes(app: Hono, deps: AdminWikiProposal
 			const result = await deps.wikiRepo.promote({ kind: p.kind, slug: p.slug, markdown: p.markdown });
 			// On successful commit, remove the proposal from the pending queue.
 			deps.proposals.delete(id);
+			deps.adminAudit.record({
+				action: "wiki_proposal.promote",
+				target: id,
+				details: { kind: p.kind, slug: p.slug, commit_sha: result.commit_sha, path: result.relative_path },
+			});
 			return c.json({ commit_sha: result.commit_sha, path: result.relative_path }, 201);
 		} catch (err) {
 			if (err instanceof WikiPromoteError && err.stage === "lint") {

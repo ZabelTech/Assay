@@ -22,6 +22,7 @@ import { loadConfig } from "./config.js";
 import { CorpusStore } from "./corpus/store.js";
 import { buildApp } from "./mcp/transport.js";
 import { ImportPipeline } from "./pipeline/import_pipeline.js";
+import { AdminAuditRepo } from "./storage/admin_audit.repo.js";
 import { AdminTokensRepo } from "./storage/admin_tokens.repo.js";
 import { AuditRepo } from "./storage/audit.repo.js";
 import { ClaimDraftsRepo } from "./storage/claim_drafts.repo.js";
@@ -128,6 +129,7 @@ const app = buildApp({
 	audit: new AuditRepo(db),
 	subjects: new SubjectRepo(db),
 	adminTokens: new AdminTokensRepo(db),
+	adminAudit: new AdminAuditRepo(db),
 	handles: new HandlesRepo(db),
 	drafts,
 	evidenceStore,

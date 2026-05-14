@@ -8,6 +8,7 @@ import type { Context } from "hono";
 import { randomBytes } from "node:crypto";
 import type { ClaimsRepo } from "../storage/claims.repo.js";
 import type { SubjectRepo } from "../storage/subject.repo.js";
+import type { AdminAuditRepo } from "../storage/admin_audit.repo.js";
 import type { AdminTokensRepo } from "../storage/admin_tokens.repo.js";
 import type { Claim, Visibility } from "../domain/types.js";
 import { parseClaim } from "../domain/validators.js";
@@ -18,6 +19,7 @@ export interface AdminClaimDeps {
 	claims: ClaimsRepo;
 	subjects: SubjectRepo;
 	adminTokens: AdminTokensRepo;
+	adminAudit: AdminAuditRepo;
 	defaultSubject: string;
 }
 
@@ -59,6 +61,11 @@ export function mountAdminClaimRoutes(app: Hono, deps: AdminClaimDeps): void {
 			return malformed(c, err instanceof Error ? err.message : String(err));
 		}
 		deps.claims.insert(claim);
+		deps.adminAudit.record({
+			action: "claim.create",
+			target: claim.claim_id,
+			details: { type: claim.type, visibility: claim.visibility },
+		});
 		return c.json({ claim }, 201);
 	});
 
@@ -112,6 +119,11 @@ export function mountAdminClaimRoutes(app: Hono, deps: AdminClaimDeps): void {
 			}
 		}
 		deps.claims.insert(updated); // insert is upsert (INSERT OR REPLACE).
+		deps.adminAudit.record({
+			action: "claim.update",
+			target: updated.claim_id,
+			details: { type: updated.type, visibility: updated.visibility, value_changed: valueTouched },
+		});
 		return c.json({ claim: updated });
 	});
 
@@ -119,6 +131,7 @@ export function mountAdminClaimRoutes(app: Hono, deps: AdminClaimDeps): void {
 		const id = c.req.param("claim_id");
 		const ok = deps.claims.delete(id);
 		if (!ok) return notFound(c);
+		deps.adminAudit.record({ action: "claim.delete", target: id });
 		return c.body(null, 204);
 	});
 }
